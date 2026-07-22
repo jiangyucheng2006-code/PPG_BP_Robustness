@@ -60,3 +60,18 @@ python scripts/prepare_pulsedb.py `
 
 正式实验前必须把工程调试划分替换为PulseDB官方Calibration-Free划分。
 
+如果已经下载Kaggle公开的VitalDB完整补充子集，可直接转换官方大文件：
+
+```powershell
+python scripts/prepare_pulsedb_subsets.py `
+  --train D:/Datasets/PPG_BP_Robustness/PulseDB/VitalDB_Subsets/VitalDB_Train_Subset.mat `
+  --test D:/Datasets/PPG_BP_Robustness/PulseDB/VitalDB_Subsets/VitalDB_CalFree_Test_Subset.mat `
+  --output D:/Datasets/PPG_BP_Robustness/processed/pulsedb_full
+```
+
+该流程保留官方Calibration-Free测试集，并仅从官方训练集按受试者划出验证集。
+
+## 标签范围说明
+
+完整VitalDB子集中约2%至3%的标签超出常用生理范围。默认配置保留全部官方样本，便于与公开基准公平比较。
+如果要做异常标签敏感性实验，可在配置文件的`data.label_filter`中设置SBP/DBP上下限；过滤只在读取时生效，不会修改原始数据。

@@ -139,7 +139,13 @@ def read_pulsedb_subject(
 class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     """Model-ready PulseDB arrays produced by ``prepare_pulsedb.py``."""
 
-    def __init__(self, root: str | Path, split: str, normalization: str = "per_segment_zscore") -> None:
+    def __init__(
+        self,
+        root: str | Path,
+        split: str,
+        normalization: str = "per_segment_zscore",
+        label_filter: dict[str, float | bool] | None = None,
+    ) -> None:
         if split not in SPLIT_TO_CODE:
             raise ValueError(f"Unknown split {split!r}; expected train, val, or test")
         if normalization not in {"none", "per_segment_zscore"}:
@@ -153,7 +159,16 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.ppg = np.load(self.root / "ppg.npy", mmap_mode="r")
         self.labels = np.load(self.root / "labels.npy", mmap_mode="r")
         split_codes = np.load(self.root / "split.npy", mmap_mode="r")
-        self.indices = np.flatnonzero(split_codes[:count] == SPLIT_TO_CODE[split])
+        selected = split_codes[:count] == SPLIT_TO_CODE[split]
+        if label_filter:
+            labels = self.labels[:count]
+            selected &= labels[:, 0] >= float(label_filter.get("sbp_min", -np.inf))
+            selected &= labels[:, 0] <= float(label_filter.get("sbp_max", np.inf))
+            selected &= labels[:, 1] >= float(label_filter.get("dbp_min", -np.inf))
+            selected &= labels[:, 1] <= float(label_filter.get("dbp_max", np.inf))
+            if bool(label_filter.get("require_sbp_gt_dbp", True)):
+                selected &= labels[:, 0] > labels[:, 1]
+        self.indices = np.flatnonzero(selected)
         self.normalization = normalization
 
         if self.ppg.shape[1] != int(self.meta["window_samples"]):

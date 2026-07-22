@@ -69,7 +69,11 @@ def main() -> None:
     device = choose_device(config["training"]["device"])
     root = Path(config["data"]["root"])
     normalization = config["data"]["normalization"]
-    datasets = {name: PulseDBMemmapDataset(root, name, normalization) for name in ("train", "val", "test")}
+    label_filter = config["data"].get("label_filter")
+    datasets = {
+        name: PulseDBMemmapDataset(root, name, normalization, label_filter)
+        for name in ("train", "val", "test")
+    }
     if any(len(dataset) == 0 for dataset in datasets.values()):
         raise ValueError("Every subject-wise split must contain at least one sample")
 
@@ -103,6 +107,9 @@ def main() -> None:
     criterion = nn.MSELoss()
     use_amp = bool(config["training"]["amp"]) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    accumulation_steps = int(config["training"].get("gradient_accumulation_steps", 1))
+    if accumulation_steps < 1:
+        raise ValueError("gradient_accumulation_steps must be at least 1")
 
     args.output.mkdir(parents=True, exist_ok=True)
     best_score = float("inf")
@@ -110,17 +117,21 @@ def main() -> None:
     for epoch in range(1, int(config["training"]["epochs"]) + 1):
         model.train()
         running_loss = 0.0
-        for signals, labels in tqdm(loaders["train"], desc=f"Epoch {epoch}"):
+        optimizer.zero_grad(set_to_none=True)
+        train_loader = loaders["train"]
+        for step, (signals, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}"), start=1):
             signals = signals.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 predictions = model(signals)
                 normalized_labels = (labels - target_mean) / target_std
                 loss = criterion(predictions, normalized_labels)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+                scaled_loss = loss / accumulation_steps
+            scaler.scale(scaled_loss).backward()
+            if step % accumulation_steps == 0 or step == len(train_loader):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad(set_to_none=True)
             running_loss += float(loss.detach()) * len(signals)
 
         validation = evaluate(model, loaders["val"], device, target_mean, target_std)

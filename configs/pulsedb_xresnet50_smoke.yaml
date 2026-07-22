@@ -4,6 +4,7 @@ data:
   sampling_rate: 125
   window_samples: 1250
   normalization: per_segment_zscore
+  label_filter: null
 model:
   name: xresnet1d
   depth: 50
@@ -12,6 +13,7 @@ model:
 training:
   epochs: 2
   batch_size: 8
+  gradient_accumulation_steps: 1
   learning_rate: 0.001
   weight_decay: 0.0001
   num_workers: 0
@@ -20,4 +22,3 @@ training:
 evaluation:
   primary_metric: mean_mae
   report_by_bp_range: true
-

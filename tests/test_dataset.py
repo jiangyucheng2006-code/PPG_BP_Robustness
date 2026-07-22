@@ -20,6 +20,14 @@ def test_memmap_dataset(tmp_path) -> None:
     assert label.tolist() == [120.0, 80.0]
     assert abs(float(signal.mean())) < 1e-5
 
+    filtered = PulseDBMemmapDataset(
+        tmp_path,
+        "train",
+        label_filter={"sbp_min": 121, "sbp_max": 200, "dbp_min": 40, "dbp_max": 130},
+    )
+    assert len(filtered) == 1
+    assert filtered[0][1].tolist() == [121.0, 81.0]
+
 
 def test_direct_single_segment_matlab_layout(tmp_path) -> None:
     path = tmp_path / "p000001.mat"

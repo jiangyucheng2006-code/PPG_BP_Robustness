@@ -4,6 +4,10 @@ data:
   sampling_rate: 125
   window_samples: 1250
   normalization: per_segment_zscore
+  # Keep null for direct comparison with the official PulseDB subset.
+  # Set to {sbp_min: 80, sbp_max: 200, dbp_min: 40, dbp_max: 130, require_sbp_gt_dbp: true}
+  # for a separate physiological-range sensitivity experiment.
+  label_filter: null
 model:
   name: xresnet1d
   depth: 101
@@ -11,7 +15,8 @@ model:
   outputs: 2
 training:
   epochs: 50
-  batch_size: 16
+  batch_size: 64
+  gradient_accumulation_steps: 8
   learning_rate: 0.001
   weight_decay: 0.0001
   num_workers: 4
@@ -20,4 +25,3 @@ training:
 evaluation:
   primary_metric: mean_mae
   report_by_bp_range: true
-
