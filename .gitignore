@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Editors and system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local data and generated artifacts
+data/raw/
+data/interim/
+data/processed/
+outputs/
+checkpoints/
+models/
+runs/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.hdf5
+*.mat
+*.npz
+
+# Secrets and local configuration
+.env
+*.key
+*.pem
