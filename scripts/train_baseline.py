@@ -56,6 +56,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("outputs/baseline"))
+    parser.add_argument("--resume", action="store_true", help="Resume from output/last.pt when available")
     args = parser.parse_args()
     config = load_config(args.config)
 
@@ -114,12 +115,26 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     best_score = float("inf")
     history: list[dict[str, float]] = []
-    for epoch in range(1, int(config["training"]["epochs"]) + 1):
+    start_epoch = 1
+    last_checkpoint = args.output / "last.pt"
+    if args.resume and last_checkpoint.exists():
+        checkpoint = torch.load(last_checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        scaler.load_state_dict(checkpoint["scaler"])
+        best_score = float(checkpoint["best_score"])
+        history = checkpoint["history"]
+        start_epoch = int(checkpoint["epoch"]) + 1
+        print(f"Resuming from epoch {start_epoch}")
+
+    for epoch in range(start_epoch, int(config["training"]["epochs"]) + 1):
         model.train()
         running_loss = 0.0
         optimizer.zero_grad(set_to_none=True)
         train_loader = loaders["train"]
-        for step, (signals, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}"), start=1):
+        for step, (signals, labels) in enumerate(
+            tqdm(train_loader, desc=f"Epoch {epoch}", mininterval=5), start=1
+        ):
             signals = signals.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             with torch.autocast(device_type=device.type, enabled=use_amp):
@@ -150,6 +165,21 @@ def main() -> None:
                 },
                 args.output / "best.pt",
             )
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scaler": scaler.state_dict(),
+                "config": config,
+                "epoch": epoch,
+                "best_score": best_score,
+                "history": history,
+                "target_mean": target_mean.cpu(),
+                "target_std": target_std.cpu(),
+            },
+            last_checkpoint,
+        )
+        (args.output / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
 
     checkpoint = torch.load(args.output / "best.pt", map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model"])

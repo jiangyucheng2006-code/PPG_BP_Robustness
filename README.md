@@ -1,53 +1,107 @@
-# Robust PPG-Based Blood Pressure Estimation
+# PPG-BP Robustness
 
-This repository contains a reproducible PPG-only blood pressure estimation
-baseline and the planned robustness research built on top of it. The project
-aims to reduce prediction errors caused by:
+PPG-only blood pressure estimation under contact-pressure variation, motion
+artifacts, and acquisition-domain shift. The current implementation establishes
+a calibration-free PulseDB baseline before introducing robustness components.
 
-- contact-pressure variation;
-- motion artifacts;
-- acquisition and dataset differences.
+## Baseline
 
-Auxiliary signals or condition labels may be used during training when available, but the final model is intended to use PPG only.
+| Component | Setting |
+|---|---|
+| Input | 10 s PPG window at 125 Hz (1,250 samples) |
+| Targets | Systolic and diastolic blood pressure |
+| Backbone | 1-D XResNet-50 or XResNet-101 |
+| Objective | MSE on standardized SBP/DBP targets |
+| Signal normalization | Per-window z-score |
+| Split protocol | Subject-disjoint, calibration-free |
+| Metrics | MAE, RMSE, bias, and error standard deviation |
 
-## Current baseline
+The main configuration uses the VitalDB-derived PulseDB calibration-free
+subsets. The official test set is kept fixed; validation subjects are held out
+from the official training subset.
 
-- Main dataset: PulseDB v2.0.
-- Input: one 10-second PPG segment sampled at 125 Hz.
-- Output: jointly predicted systolic and diastolic BP.
-- Backbone: independently implemented 1-D XResNet-50/101.
-- Evaluation: subject-wise splits with MAE, RMSE, bias, and error SD.
+| Split | Windows |
+|---|---:|
+| Train | 412,920 |
+| Validation | 52,560 |
+| Test | 57,600 |
 
-The public OOD-generalization benchmark by Moulaeifard et al. (2025) is the
-primary methodological reference. Its released code and the official PulseDB
-repository are linked in [`docs/REFERENCES.md`](docs/REFERENCES.md).
+## Installation
 
-## Workflow
+Python 3.10 or later is required.
 
-1. Download and audit the official PulseDB data.
-2. Harmonize PPG preprocessing and BP labels.
-3. Reproduce the PPG-only XResNet baseline.
-4. Add pressure-, motion-, and domain-robustness components.
-5. Perform subject-wise evaluation, external validation, and ablation studies.
+```bash
+python -m pip install -e ".[dev]"
+```
 
-## Repository structure
+## Data preparation
 
-- `configs/`: experiment configurations.
-- `data/`: instructions and local dataset locations; raw data are not uploaded.
-- `notebooks/`: exploratory analysis.
-- `src/`: preprocessing, models, training, and evaluation code.
-- `tests/`: automated tests.
+Download the PulseDB subset files from the source listed in
+[`data/README.md`](data/README.md), then convert the VitalDB training and
+calibration-free test subsets:
 
-## Data policy
+```bash
+python scripts/prepare_pulsedb_subsets.py \
+  --train <DATA_ROOT>/PulseDB/VitalDB_Subsets/VitalDB_Train_Subset.mat \
+  --test <DATA_ROOT>/PulseDB/VitalDB_Subsets/VitalDB_CalFree_Test_Subset.mat \
+  --output <DATA_ROOT>/processed/pulsedb_full
+```
 
-Large public datasets, generated outputs, model checkpoints, and any sensitive recordings must remain outside GitHub. Only download instructions and processing code should be committed.
+The converter writes memory-mapped `ppg.npy`, `labels.npy`, and `split.npy`
+arrays. Raw waveforms and generated arrays are not tracked by Git.
 
-## Start here
+## Training
 
-The step-by-step Chinese guide is in
-[`docs/START_HERE_zh.md`](docs/START_HERE_zh.md).
+Set the data root and run the XResNet-101 configuration:
 
-For a beginner-friendly record of downloaded data, completed work, local
-results, and one-click usage, see
-[`docs/WHAT_I_DID_zh.md`](docs/WHAT_I_DID_zh.md) or double-click
-`PPG_BP项目入口.bat` on Windows.
+```powershell
+$env:PPG_BP_DATA_ROOT = "D:/Datasets/PPG_BP_Robustness"
+python scripts/train_baseline.py `
+  --config configs/pulsedb_xresnet101.yaml `
+  --output outputs/pulsedb_xresnet101_full `
+  --resume
+```
+
+Training writes the following local artifacts:
+
+| File | Description |
+|---|---|
+| `best.pt` | Checkpoint with the lowest validation MAE |
+| `last.pt` | Latest resumable training state |
+| `history.json` | Per-epoch training and validation metrics |
+| `metrics.json` | Final evaluation on the fixed test set |
+
+The smoke configuration is limited to pipeline verification:
+
+```powershell
+python scripts/train_baseline.py `
+  --config configs/pulsedb_xresnet50_smoke.yaml `
+  --output outputs/smoke_xresnet50
+```
+
+## Repository layout
+
+```text
+configs/        Experiment configurations
+data/           Dataset source and layout
+docs/           References
+scripts/        Data preparation, audit, and training entry points
+src/ppg_bp/     Dataset, model, and metric implementations
+tests/          Unit tests
+```
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+## Planned extensions
+
+- condition-invariant representations for contact-pressure variation;
+- motion-corruption augmentation and artifact-aware feature learning;
+- domain-robust training and external-dataset evaluation;
+- controlled ablations against the PPG-only XResNet baseline.
+
+Core references and upstream implementations are listed in
+[`docs/REFERENCES.md`](docs/REFERENCES.md).
