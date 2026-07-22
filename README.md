@@ -46,3 +46,8 @@ Large public datasets, generated outputs, model checkpoints, and any sensitive r
 
 The step-by-step Chinese guide is in
 [`docs/START_HERE_zh.md`](docs/START_HERE_zh.md).
+
+For a beginner-friendly record of downloaded data, completed work, local
+results, and one-click usage, see
+[`docs/WHAT_I_DID_zh.md`](docs/WHAT_I_DID_zh.md) or double-click
+`PPG_BP项目入口.bat` on Windows.
