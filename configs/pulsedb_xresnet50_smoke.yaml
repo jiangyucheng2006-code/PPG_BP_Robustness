@@ -1,0 +1,23 @@
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/smoke"
+  sampling_rate: 125
+  window_samples: 1250
+  normalization: per_segment_zscore
+model:
+  name: xresnet1d
+  depth: 50
+  input_channels: 1
+  outputs: 2
+training:
+  epochs: 2
+  batch_size: 8
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  num_workers: 0
+  amp: false
+  device: auto
+evaluation:
+  primary_metric: mean_mae
+  report_by_bp_range: true
+

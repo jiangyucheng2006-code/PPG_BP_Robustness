@@ -1,0 +1,23 @@
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/pulsedb_full"
+  sampling_rate: 125
+  window_samples: 1250
+  normalization: per_segment_zscore
+model:
+  name: xresnet1d
+  depth: 101
+  input_channels: 1
+  outputs: 2
+training:
+  epochs: 50
+  batch_size: 16
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  num_workers: 4
+  amp: true
+  device: auto
+evaluation:
+  primary_metric: mean_mae
+  report_by_bp_range: true
+

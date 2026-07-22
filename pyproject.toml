@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ppg-bp-robustness"
+version = "0.1.0"
+description = "PPG-only blood pressure estimation and robustness research"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "gdown>=5.2",
+  "h5py>=3.10",
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "PyYAML>=6.0",
+  "torch>=2.2",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
