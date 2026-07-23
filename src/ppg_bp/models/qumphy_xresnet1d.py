@@ -219,13 +219,126 @@ class QumphyXResNet1D(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
+    def forward_feature_map(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.stages(self.stem(inputs))
+
     def forward_features(self, inputs: torch.Tensor) -> torch.Tensor:
-        features = self.stages(self.stem(inputs))
+        features = self.forward_feature_map(inputs)
         pooled = torch.cat((self.max_pool(features), self.avg_pool(features)), dim=1)
         return pooled.flatten(1)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.head(self.forward_features(inputs))
+
+
+class TaskSpecificAttentionHead1D(nn.Module):
+    """Channel-temporal attention and regression head for one BP target."""
+
+    def __init__(
+        self,
+        channels: int,
+        *,
+        reduction: int = 8,
+        temporal_kernel_size: int = 7,
+        dropout: float = 0.5,
+    ) -> None:
+        super().__init__()
+        hidden_channels = max(channels // reduction, 16)
+        self.channel_attention = nn.Sequential(
+            nn.Conv1d(channels, hidden_channels, 1, bias=False),
+            nn.ReLU(),
+            nn.Conv1d(hidden_channels, channels, 1),
+        )
+        self.temporal_attention = nn.Conv1d(
+            2,
+            1,
+            temporal_kernel_size,
+            padding=(temporal_kernel_size - 1) // 2,
+        )
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.regressor = nn.Sequential(
+            nn.BatchNorm1d(channels * 2),
+            nn.Dropout(dropout),
+            nn.Linear(channels * 2, 1),
+        )
+
+    def reset_attention_to_identity(self) -> None:
+        channel_output = self.channel_attention[-1]
+        assert isinstance(channel_output, nn.Conv1d)
+        nn.init.zeros_(channel_output.weight)
+        nn.init.zeros_(channel_output.bias)
+        nn.init.zeros_(self.temporal_attention.weight)
+        nn.init.zeros_(self.temporal_attention.bias)
+
+    def attention_maps(
+        self,
+        features: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        average_descriptor = self.avg_pool(features)
+        maximum_descriptor = self.max_pool(features)
+        channel_logits = self.channel_attention(average_descriptor)
+        channel_logits = channel_logits + self.channel_attention(maximum_descriptor)
+        channel_scale = 0.5 + torch.sigmoid(channel_logits)
+
+        channel_refined = features * channel_scale
+        temporal_descriptor = torch.cat(
+            (
+                channel_refined.mean(dim=1, keepdim=True),
+                channel_refined.amax(dim=1, keepdim=True),
+            ),
+            dim=1,
+        )
+        temporal_scale = 0.5 + torch.sigmoid(
+            self.temporal_attention(temporal_descriptor)
+        )
+        return channel_scale, temporal_scale
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        channel_scale, temporal_scale = self.attention_maps(features)
+        attended = features * channel_scale * temporal_scale
+        pooled = torch.cat((self.max_pool(attended), self.avg_pool(attended)), dim=1)
+        return self.regressor(pooled.flatten(1))
+
+
+class QumphyTaskAttentionXResNet1D(QumphyXResNet1D):
+    """Multiscale XResNet with separate SBP and DBP attention heads."""
+
+    def __init__(
+        self,
+        layers: Sequence[int],
+        *,
+        input_channels: int = 1,
+        outputs: int = 2,
+        dropout: float = 0.5,
+    ) -> None:
+        if outputs != 2:
+            raise ValueError("Task-specific BP attention requires exactly two outputs")
+        super().__init__(
+            layers,
+            input_channels=input_channels,
+            outputs=outputs,
+            dropout=dropout,
+            multiscale_stem=True,
+        )
+        self.head = nn.Identity()
+        self.task_heads = nn.ModuleList(
+            [
+                TaskSpecificAttentionHead1D(256, dropout=dropout),
+                TaskSpecificAttentionHead1D(256, dropout=dropout),
+            ]
+        )
+        for module in self.task_heads.modules():
+            if isinstance(module, (nn.Conv1d, nn.Linear)):
+                nn.init.kaiming_normal_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        for task_head in self.task_heads:
+            task_head.reset_attention_to_identity()
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = self.forward_feature_map(inputs)
+        return torch.cat([head(features) for head in self.task_heads], dim=1)
 
 
 def qumphy_xresnet1d50(
@@ -283,4 +396,18 @@ def qumphy_attention_multiscale_xresnet1d50(
         outputs=outputs,
         dropout=dropout,
         adaptive_scale_attention=True,
+    )
+
+
+def qumphy_task_attention_multiscale_xresnet1d50(
+    *,
+    input_channels: int = 1,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyTaskAttentionXResNet1D:
+    return QumphyTaskAttentionXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
     )

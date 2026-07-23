@@ -19,6 +19,7 @@ from ppg_bp.data.pulsedb import PulseDBMemmapDataset
 from ppg_bp.models import (
     qumphy_attention_multiscale_xresnet1d50,
     qumphy_multiscale_xresnet1d50,
+    qumphy_task_attention_multiscale_xresnet1d50,
     qumphy_xresnet1d50,
     qumphy_xresnet1d101,
     xresnet1d50,
@@ -126,6 +127,9 @@ def main() -> None:
         "qumphy_multiscale_xresnet1d": {50: qumphy_multiscale_xresnet1d50},
         "qumphy_attention_multiscale_xresnet1d": {
             50: qumphy_attention_multiscale_xresnet1d50
+        },
+        "qumphy_task_attention_multiscale_xresnet1d": {
+            50: qumphy_task_attention_multiscale_xresnet1d50
         },
     }
     if model_name not in factories:
