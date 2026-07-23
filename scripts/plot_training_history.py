@@ -30,7 +30,10 @@ def main() -> None:
         history = history["history"]
 
     epochs = [row["epoch"] for row in history]
-    train_mse = [row["train_mse"] for row in history]
+    train_loss = [
+        row["train_loss"] if "train_loss" in row else row["train_mse"]
+        for row in history
+    ]
     sbp_mae = [row["sbp_mae"] for row in history]
     dbp_mae = [row["dbp_mae"] for row in history]
     mean_mae = [row["mean_mae"] for row in history]
@@ -41,7 +44,7 @@ def main() -> None:
     plt.style.use("seaborn-v0_8-whitegrid")
     figure, axes = plt.subplots(1, 2, figsize=(12, 4.5), dpi=160)
 
-    axes[0].plot(epochs, train_mse, color="#2458A6", linewidth=2.2)
+    axes[0].plot(epochs, train_loss, color="#2458A6", linewidth=2.2)
     axes[0].axvline(best_epoch, color="#D95F02", linestyle="--", linewidth=1.5)
     axes[0].set(
         title="Training loss",

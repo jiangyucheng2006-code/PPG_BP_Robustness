@@ -74,6 +74,40 @@ class BenchmarkBottleneck1D(nn.Module):
         return self.activation(self.main(inputs) + self.shortcut(inputs))
 
 
+class MultiScaleInputStem(nn.Module):
+    """Fuse short-, medium-, and long-range PPG patterns before XResNet."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        *,
+        branch_channels: int = 16,
+        output_channels: int = 32,
+        kernel_sizes: Sequence[int] = (3, 7, 15),
+    ) -> None:
+        super().__init__()
+        self.branches = nn.ModuleList(
+            [
+                BenchmarkConvLayer(
+                    input_channels,
+                    branch_channels,
+                    kernel_size,
+                    stride=2,
+                )
+                for kernel_size in kernel_sizes
+            ]
+        )
+        self.fusion = BenchmarkConvLayer(
+            branch_channels * len(kernel_sizes),
+            output_channels,
+            1,
+        )
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = torch.cat([branch(inputs) for branch in self.branches], dim=1)
+        return self.fusion(features)
+
+
 class QumphyXResNet1D(nn.Module):
     """Benchmark-compatible 1-D XResNet for two-output BP regression."""
 
@@ -84,10 +118,16 @@ class QumphyXResNet1D(nn.Module):
         input_channels: int = 1,
         outputs: int = 2,
         dropout: float = 0.5,
+        multiscale_stem: bool = False,
     ) -> None:
         super().__init__()
+        first_stem: nn.Module
+        if multiscale_stem:
+            first_stem = MultiScaleInputStem(input_channels)
+        else:
+            first_stem = BenchmarkConvLayer(input_channels, 32, 5, stride=2)
         self.stem = nn.Sequential(
-            BenchmarkConvLayer(input_channels, 32, 5, stride=2),
+            first_stem,
             BenchmarkConvLayer(32, 32, 5),
             BenchmarkConvLayer(32, 64, 5),
             nn.MaxPool1d(kernel_size=3, stride=2, padding=1),
@@ -154,4 +194,19 @@ def qumphy_xresnet1d101(
         input_channels=input_channels,
         outputs=outputs,
         dropout=dropout,
+    )
+
+
+def qumphy_multiscale_xresnet1d50(
+    *,
+    input_channels: int = 1,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyXResNet1D:
+    return QumphyXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
+        multiscale_stem=True,
     )
