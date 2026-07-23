@@ -1,0 +1,35 @@
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/pulsedb_full"
+  sampling_rate: 125
+  window_samples: 1250
+  normalization: none
+  split_filename: split.npy
+  label_filter: null
+model:
+  name: qumphy_attention_multiscale_xresnet1d
+  depth: 50
+  input_channels: 1
+  outputs: 2
+  dropout: 0.5
+training:
+  epochs: 50
+  batch_size: 512
+  gradient_accumulation_steps: 1
+  target_standardization: false
+  loss:
+    name: mse
+  scheduler:
+    name: constant
+  early_stopping:
+    patience: 6
+    min_delta: 0.0
+  learning_rate: 0.001
+  weight_decay: 0.001
+  num_workers: 8
+  evaluation_num_workers: 0
+  amp: true
+  device: auto
+evaluation:
+  primary_metric: sbp_mae
+  report_by_bp_range: true

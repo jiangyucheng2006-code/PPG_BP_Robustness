@@ -108,6 +108,57 @@ class MultiScaleInputStem(nn.Module):
         return self.fusion(features)
 
 
+class AdaptiveScaleAttentionStem(MultiScaleInputStem):
+    """Weight PPG receptive-field scales independently for every segment."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        *,
+        branch_channels: int = 16,
+        output_channels: int = 32,
+        kernel_sizes: Sequence[int] = (3, 7, 15),
+        attention_hidden: int = 24,
+    ) -> None:
+        super().__init__(
+            input_channels,
+            branch_channels=branch_channels,
+            output_channels=output_channels,
+            kernel_sizes=kernel_sizes,
+        )
+        descriptor_channels = branch_channels * len(kernel_sizes) * 2
+        self.scale_attention = nn.Sequential(
+            nn.Linear(descriptor_channels, attention_hidden),
+            nn.ReLU(),
+            nn.Linear(attention_hidden, len(kernel_sizes)),
+        )
+
+    def extract_scale_features(
+        self,
+        inputs: torch.Tensor,
+    ) -> tuple[list[torch.Tensor], torch.Tensor]:
+        features = [branch(inputs) for branch in self.branches]
+        descriptor = torch.cat(
+            [
+                statistic
+                for feature in features
+                for statistic in (feature.mean(dim=-1), feature.amax(dim=-1))
+            ],
+            dim=1,
+        )
+        weights = torch.softmax(self.scale_attention(descriptor), dim=1)
+        return features, weights
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features, weights = self.extract_scale_features(inputs)
+        scale_count = len(features)
+        weighted = [
+            feature * weights[:, index, None, None] * scale_count
+            for index, feature in enumerate(features)
+        ]
+        return self.fusion(torch.cat(weighted, dim=1))
+
+
 class QumphyXResNet1D(nn.Module):
     """Benchmark-compatible 1-D XResNet for two-output BP regression."""
 
@@ -119,10 +170,13 @@ class QumphyXResNet1D(nn.Module):
         outputs: int = 2,
         dropout: float = 0.5,
         multiscale_stem: bool = False,
+        adaptive_scale_attention: bool = False,
     ) -> None:
         super().__init__()
         first_stem: nn.Module
-        if multiscale_stem:
+        if adaptive_scale_attention:
+            first_stem = AdaptiveScaleAttentionStem(input_channels)
+        elif multiscale_stem:
             first_stem = MultiScaleInputStem(input_channels)
         else:
             first_stem = BenchmarkConvLayer(input_channels, 32, 5, stride=2)
@@ -152,6 +206,11 @@ class QumphyXResNet1D(nn.Module):
             nn.Linear(in_channels * 2, outputs),
         )
         self._initialize_weights()
+        if isinstance(first_stem, AdaptiveScaleAttentionStem):
+            output_layer = first_stem.scale_attention[-1]
+            assert isinstance(output_layer, nn.Linear)
+            nn.init.zeros_(output_layer.weight)
+            nn.init.zeros_(output_layer.bias)
 
     def _initialize_weights(self) -> None:
         for module in self.modules():
@@ -209,4 +268,19 @@ def qumphy_multiscale_xresnet1d50(
         outputs=outputs,
         dropout=dropout,
         multiscale_stem=True,
+    )
+
+
+def qumphy_attention_multiscale_xresnet1d50(
+    *,
+    input_channels: int = 1,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyXResNet1D:
+    return QumphyXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
+        adaptive_scale_attention=True,
     )

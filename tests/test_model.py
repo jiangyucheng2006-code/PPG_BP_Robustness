@@ -1,6 +1,12 @@
 import torch
 
-from ppg_bp.models import qumphy_multiscale_xresnet1d50, qumphy_xresnet1d50, xresnet1d50
+from ppg_bp.models import (
+    AdaptiveScaleAttentionStem,
+    qumphy_attention_multiscale_xresnet1d50,
+    qumphy_multiscale_xresnet1d50,
+    qumphy_xresnet1d50,
+    xresnet1d50,
+)
 
 
 def test_xresnet_output_shape() -> None:
@@ -31,3 +37,25 @@ def test_multiscale_xresnet_is_lightweight() -> None:
     with torch.no_grad():
         output = multiscale(torch.randn(2, 1, 1250))
     assert output.shape == (2, 2)
+
+
+def test_adaptive_scale_attention_weights_and_output() -> None:
+    torch.manual_seed(42)
+    model = qumphy_attention_multiscale_xresnet1d50()
+    model.eval()
+    inputs = torch.randn(2, 1, 1250)
+    with torch.no_grad():
+        outputs = model(inputs)
+        stem = model.stem[0]
+        assert isinstance(stem, AdaptiveScaleAttentionStem)
+        _, weights = stem.extract_scale_features(inputs)
+
+    multiscale_parameters = sum(
+        parameter.numel() for parameter in qumphy_multiscale_xresnet1d50().parameters()
+    )
+    attention_parameters = sum(parameter.numel() for parameter in model.parameters())
+    assert 0 < attention_parameters - multiscale_parameters < 5_000
+    assert outputs.shape == (2, 2)
+    assert weights.shape == (2, 3)
+    assert torch.allclose(weights.sum(dim=1), torch.ones(2), atol=1e-6)
+    assert torch.allclose(weights, torch.full_like(weights, 1 / 3), atol=1e-6)

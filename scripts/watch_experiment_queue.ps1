@@ -4,12 +4,14 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $outputRoot = Join-Path $projectRoot "outputs"
 $queues = @(
     @{ Name = "B1/B2 queue"; Path = (Join-Path $outputRoot "b1_b2_queue\status.json") },
-    @{ Name = "B2 controlled queue"; Path = (Join-Path $outputRoot "b2_control_queue\status.json") }
+    @{ Name = "B2 controlled queue"; Path = (Join-Path $outputRoot "b2_control_queue\status.json") },
+    @{ Name = "B3 attention queue"; Path = (Join-Path $outputRoot "b3_attention_queue\status.json") }
 )
 $runs = @(
     @{ Name = "B1"; Directory = "pulsedb_b1_huber_cosine" },
     @{ Name = "B2"; Directory = "pulsedb_b2_multiscale" },
-    @{ Name = "B2 controlled"; Directory = "pulsedb_b2_multiscale_control" }
+    @{ Name = "B2 controlled"; Directory = "pulsedb_b2_multiscale_control" },
+    @{ Name = "B3 attention"; Directory = "pulsedb_b3_attention_multiscale_control" }
 )
 
 while ($true) {
