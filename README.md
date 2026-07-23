@@ -10,9 +10,9 @@ a calibration-free PulseDB baseline before introducing robustness components.
 |---|---|
 | Input | 10 s PPG window at 125 Hz (1,250 samples) |
 | Targets | Systolic and diastolic blood pressure |
-| Backbone | 1-D XResNet-50 or XResNet-101 |
-| Objective | MSE on standardized SBP/DBP targets |
-| Signal normalization | Per-window z-score |
+| Backbone | QUMPHY-compatible 1-D XResNet-50 (886,690 parameters) |
+| Objective | MSE on SBP/DBP in mmHg |
+| Signal normalization | PulseDB filtered PPG (`PPG_F`), no additional normalization |
 | Split protocol | Subject-disjoint, calibration-free |
 | Metrics | MAE, RMSE, bias, and error standard deviation |
 
@@ -28,18 +28,20 @@ from the official training subset.
 
 ## Baseline result
 
-The first full XResNet-101 run completed on the VitalDB-derived,
-calibration-free split. The checkpoint from epoch 7 was selected using
-validation mean MAE and then evaluated once on the fixed test set.
+The official-compatible XResNet-50 is the project baseline. Its topology and
+parameter count match the upstream QUMPHY implementation. The checkpoint from
+epoch 4 was selected using validation SBP MAE and evaluated once on the fixed
+PulseDB VitalDB calibration-free test set.
 
 | Model | SBP MAE | DBP MAE | Mean MAE |
 |---|---:|---:|---:|
 | Train-set mean predictor | 14.94 | 9.43 | 12.19 |
-| XResNet-101 | **13.46** | **8.55** | **11.00** |
+| Independent wide XResNet-101 | 13.46 | 8.55 | 11.00 |
+| **Official-compatible XResNet-50** | **12.49** | **8.06** | **10.28** |
 
 Values are in mmHg. Training curves, run settings, and the complete metric
 summary are available in
-[`results/xresnet101_vital_calibfree`](results/xresnet101_vital_calibfree).
+[`results/qumphy_xresnet50_vital_calibfree`](results/qumphy_xresnet50_vital_calibfree).
 
 ## Installation
 
@@ -67,13 +69,13 @@ arrays. Raw waveforms and generated arrays are not tracked by Git.
 
 ## Training
 
-Set the data root and run the XResNet-101 configuration:
+Set the data root and run the official-compatible XResNet-50 configuration:
 
 ```powershell
 $env:PPG_BP_DATA_ROOT = "D:/Datasets/PPG_BP_Robustness"
 python scripts/train_baseline.py `
-  --config configs/pulsedb_xresnet101.yaml `
-  --output outputs/pulsedb_xresnet101_full `
+  --config configs/pulsedb_qumphy_xresnet50.yaml `
+  --output outputs/pulsedb_qumphy_xresnet50_full `
   --resume
 ```
 

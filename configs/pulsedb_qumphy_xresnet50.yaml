@@ -1,0 +1,30 @@
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/pulsedb_full"
+  sampling_rate: 125
+  window_samples: 1250
+  normalization: none
+  # Uses the existing deterministic, subject-disjoint validation holdout.
+  # The upstream QUMPHY split script does not publish its random seed, so its
+  # exact validation-subject identities cannot be reconstructed.
+  split_filename: split.npy
+  label_filter: null
+model:
+  name: qumphy_xresnet1d
+  depth: 50
+  input_channels: 1
+  outputs: 2
+  dropout: 0.5
+training:
+  epochs: 50
+  batch_size: 512
+  gradient_accumulation_steps: 1
+  target_standardization: false
+  learning_rate: 0.001
+  weight_decay: 0.001
+  num_workers: 8
+  amp: true
+  device: auto
+evaluation:
+  primary_metric: sbp_mae
+  report_by_bp_range: true

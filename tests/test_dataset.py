@@ -28,6 +28,16 @@ def test_memmap_dataset(tmp_path) -> None:
     assert len(filtered) == 1
     assert filtered[0][1].tolist() == [121.0, 81.0]
 
+    np.save(tmp_path / "alternate_split.npy", np.array([1, 0, 0, 2], dtype=np.uint8))
+    alternate = PulseDBMemmapDataset(
+        tmp_path,
+        "train",
+        normalization="none",
+        split_filename="alternate_split.npy",
+    )
+    assert len(alternate) == 2
+    assert alternate[0][1].tolist() == [121.0, 81.0]
+
 
 def test_direct_single_segment_matlab_layout(tmp_path) -> None:
     path = tmp_path / "p000001.mat"

@@ -16,7 +16,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from ppg_bp.data.pulsedb import PulseDBMemmapDataset
-from ppg_bp.models import xresnet1d50, xresnet1d101
+from ppg_bp.models import (
+    qumphy_xresnet1d50,
+    qumphy_xresnet1d101,
+    xresnet1d50,
+    xresnet1d101,
+)
 from ppg_bp.training.metrics import regression_metrics
 
 
@@ -71,8 +76,15 @@ def main() -> None:
     root = Path(config["data"]["root"])
     normalization = config["data"]["normalization"]
     label_filter = config["data"].get("label_filter")
+    split_filename = str(config["data"].get("split_filename", "split.npy"))
     datasets = {
-        name: PulseDBMemmapDataset(root, name, normalization, label_filter)
+        name: PulseDBMemmapDataset(
+            root,
+            name,
+            normalization,
+            label_filter,
+            split_filename=split_filename,
+        )
         for name in ("train", "val", "test")
     }
     if any(len(dataset) == 0 for dataset in datasets.values()):
@@ -92,14 +104,32 @@ def main() -> None:
         for name, dataset in datasets.items()
     }
     train_targets = np.asarray(datasets["train"].labels[datasets["train"].indices], dtype=np.float32)
-    target_mean = torch.from_numpy(train_targets.mean(axis=0)).to(device)
-    target_std = torch.from_numpy(train_targets.std(axis=0).clip(min=1.0)).to(device)
+    train_target_mean = torch.from_numpy(train_targets.mean(axis=0)).to(device)
+    train_target_std = torch.from_numpy(train_targets.std(axis=0).clip(min=1.0)).to(device)
+    standardize_targets = bool(config["training"].get("target_standardization", True))
+    if standardize_targets:
+        target_mean = train_target_mean
+        target_std = train_target_std
+    else:
+        target_mean = torch.zeros(2, dtype=torch.float32, device=device)
+        target_std = torch.ones(2, dtype=torch.float32, device=device)
 
     depth = int(config["model"]["depth"])
-    factory = {50: xresnet1d50, 101: xresnet1d101}.get(depth)
+    model_name = str(config["model"]["name"])
+    factories = {
+        "xresnet1d": {50: xresnet1d50, 101: xresnet1d101},
+        "qumphy_xresnet1d": {50: qumphy_xresnet1d50, 101: qumphy_xresnet1d101},
+    }
+    if model_name not in factories:
+        raise ValueError(f"Unsupported model name: {model_name}")
+    factory = factories[model_name].get(depth)
     if factory is None:
         raise ValueError("Supported XResNet depths are 50 and 101")
-    model = factory(input_channels=1, outputs=2).to(device)
+    model = factory(
+        input_channels=int(config["model"].get("input_channels", 1)),
+        outputs=int(config["model"].get("outputs", 2)),
+        dropout=float(config["model"].get("dropout", 0.5 if model_name == "qumphy_xresnet1d" else 0.2)),
+    ).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(config["training"]["learning_rate"]),
@@ -111,6 +141,7 @@ def main() -> None:
     accumulation_steps = int(config["training"].get("gradient_accumulation_steps", 1))
     if accumulation_steps < 1:
         raise ValueError("gradient_accumulation_steps must be at least 1")
+    primary_metric = str(config["evaluation"].get("primary_metric", "mean_mae"))
 
     args.output.mkdir(parents=True, exist_ok=True)
     best_score = float("inf")
@@ -153,8 +184,10 @@ def main() -> None:
         row = {"epoch": epoch, "train_mse": running_loss / len(datasets["train"]), **validation}
         history.append(row)
         print(json.dumps(row))
-        if validation["mean_mae"] < best_score:
-            best_score = validation["mean_mae"]
+        if primary_metric not in validation:
+            raise KeyError(f"Unknown primary metric: {primary_metric}")
+        if validation[primary_metric] < best_score:
+            best_score = validation[primary_metric]
             torch.save(
                 {
                     "model": model.state_dict(),
@@ -185,13 +218,14 @@ def main() -> None:
     model.load_state_dict(checkpoint["model"])
     test_metrics = evaluate(model, loaders["test"], device, target_mean, target_std)
     test_targets = np.asarray(datasets["test"].labels[datasets["test"].indices], dtype=np.float32)
-    mean_predictions = np.broadcast_to(target_mean.cpu().numpy(), test_targets.shape)
+    mean_predictions = np.broadcast_to(train_target_mean.cpu().numpy(), test_targets.shape)
     mean_baseline = regression_metrics(mean_predictions, test_targets)
     result = {
         "device": str(device),
         "best_epoch": int(checkpoint["epoch"]),
-        "train_target_mean": target_mean.cpu().tolist(),
-        "train_target_std": target_std.cpu().tolist(),
+        "target_standardization": standardize_targets,
+        "train_target_mean": train_target_mean.cpu().tolist(),
+        "train_target_std": train_target_std.cpu().tolist(),
         "mean_predictor_test": mean_baseline,
         "test": test_metrics,
         "history": history,
