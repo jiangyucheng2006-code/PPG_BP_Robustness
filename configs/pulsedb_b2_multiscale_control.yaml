@@ -21,6 +21,9 @@ training:
     name: mse
   scheduler:
     name: constant
+  early_stopping:
+    patience: 6
+    min_delta: 0.0
   learning_rate: 0.001
   weight_decay: 0.001
   num_workers: 8
