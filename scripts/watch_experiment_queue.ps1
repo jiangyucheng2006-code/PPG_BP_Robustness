@@ -2,7 +2,10 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $outputRoot = Join-Path $projectRoot "outputs"
-$queueStatus = Join-Path $outputRoot "b1_b2_queue\status.json"
+$queues = @(
+    @{ Name = "B1/B2 queue"; Path = (Join-Path $outputRoot "b1_b2_queue\status.json") },
+    @{ Name = "B2 controlled queue"; Path = (Join-Path $outputRoot "b2_control_queue\status.json") }
+)
 $runs = @(
     @{ Name = "B1"; Directory = "pulsedb_b1_huber_cosine" },
     @{ Name = "B2"; Directory = "pulsedb_b2_multiscale" },
@@ -15,11 +18,11 @@ while ($true) {
     Write-Host ("Updated: " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
     Write-Host ""
 
-    if (Test-Path $queueStatus) {
-        $queue = Get-Content $queueStatus -Raw | ConvertFrom-Json
-        Write-Host ("Queue: " + $queue.state)
-    } else {
-        Write-Host "Queue: status file not found"
+    foreach ($queueInfo in $queues) {
+        if (Test-Path $queueInfo.Path) {
+            $queue = Get-Content $queueInfo.Path -Raw | ConvertFrom-Json
+            Write-Host ($queueInfo.Name + ": " + $queue.state)
+        }
     }
 
     foreach ($run in $runs) {
