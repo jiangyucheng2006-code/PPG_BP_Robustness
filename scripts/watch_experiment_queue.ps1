@@ -5,7 +5,8 @@ $outputRoot = Join-Path $projectRoot "outputs"
 $queueStatus = Join-Path $outputRoot "b1_b2_queue\status.json"
 $runs = @(
     @{ Name = "B1"; Directory = "pulsedb_b1_huber_cosine" },
-    @{ Name = "B2"; Directory = "pulsedb_b2_multiscale" }
+    @{ Name = "B2"; Directory = "pulsedb_b2_multiscale" },
+    @{ Name = "B2 controlled"; Directory = "pulsedb_b2_multiscale_control" }
 )
 
 while ($true) {
