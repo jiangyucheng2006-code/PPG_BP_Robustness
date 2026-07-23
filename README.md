@@ -26,6 +26,21 @@ from the official training subset.
 | Validation | 52,560 |
 | Test | 57,600 |
 
+## Baseline result
+
+The first full XResNet-101 run completed on the VitalDB-derived,
+calibration-free split. The checkpoint from epoch 7 was selected using
+validation mean MAE and then evaluated once on the fixed test set.
+
+| Model | SBP MAE | DBP MAE | Mean MAE |
+|---|---:|---:|---:|
+| Train-set mean predictor | 14.94 | 9.43 | 12.19 |
+| XResNet-101 | **13.46** | **8.55** | **11.00** |
+
+Values are in mmHg. Training curves, run settings, and the complete metric
+summary are available in
+[`results/xresnet101_vital_calibfree`](results/xresnet101_vital_calibfree).
+
 ## Installation
 
 Python 3.10 or later is required.
