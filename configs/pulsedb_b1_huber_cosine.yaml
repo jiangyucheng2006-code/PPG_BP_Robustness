@@ -29,6 +29,7 @@ training:
   learning_rate: 0.001
   weight_decay: 0.001
   num_workers: 8
+  evaluation_num_workers: 0
   amp: true
   device: auto
 evaluation:

@@ -93,18 +93,19 @@ def main() -> None:
 
     batch_size = int(config["training"]["batch_size"])
     workers = int(config["training"]["num_workers"])
-    loaders = {
-        name: DataLoader(
+    evaluation_workers = int(config["training"].get("evaluation_num_workers", 0))
+    loaders = {}
+    for name, dataset in datasets.items():
+        loader_workers = workers if name == "train" else evaluation_workers
+        loaders[name] = DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=name == "train",
             drop_last=name == "train",
-            num_workers=workers,
+            num_workers=loader_workers,
             pin_memory=device.type == "cuda",
-            persistent_workers=workers > 0,
+            persistent_workers=name == "train" and loader_workers > 0,
         )
-        for name, dataset in datasets.items()
-    }
     train_targets = np.asarray(datasets["train"].labels[datasets["train"].indices], dtype=np.float32)
     train_target_mean = torch.from_numpy(train_targets.mean(axis=0)).to(device)
     train_target_std = torch.from_numpy(train_targets.std(axis=0).clip(min=1.0)).to(device)
