@@ -20,6 +20,7 @@ data/interim/
 data/processed/
 outputs/
 checkpoints/
+/tmp/
 /models/
 runs/
 wandb/

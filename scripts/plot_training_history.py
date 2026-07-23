@@ -13,6 +13,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("history", type=Path, help="Path to history.json")
     parser.add_argument("output", type=Path, help="Output PNG path")
+    parser.add_argument("--title", default="Baseline training")
+    parser.add_argument("--loss-label", default="MSE")
+    parser.add_argument(
+        "--primary-metric",
+        choices=("sbp_mae", "dbp_mae", "mean_mae"),
+        default="mean_mae",
+    )
     return parser.parse_args()
 
 
@@ -27,7 +34,8 @@ def main() -> None:
     sbp_mae = [row["sbp_mae"] for row in history]
     dbp_mae = [row["dbp_mae"] for row in history]
     mean_mae = [row["mean_mae"] for row in history]
-    best_index = min(range(len(history)), key=lambda index: mean_mae[index])
+    primary_values = [row[args.primary_metric] for row in history]
+    best_index = min(range(len(history)), key=lambda index: primary_values[index])
     best_epoch = epochs[best_index]
 
     plt.style.use("seaborn-v0_8-whitegrid")
@@ -38,7 +46,7 @@ def main() -> None:
     axes[0].set(
         title="Training loss",
         xlabel="Epoch",
-        ylabel="Standardized MSE",
+        ylabel=args.loss_label,
         yscale="log",
     )
 
@@ -53,7 +61,7 @@ def main() -> None:
     )
     axes[1].scatter(
         [best_epoch],
-        [mean_mae[best_index]],
+        [primary_values[best_index]],
         color="#D95F02",
         zorder=5,
         label=f"Best epoch ({best_epoch})",
@@ -66,7 +74,7 @@ def main() -> None:
     )
     axes[1].legend(frameon=True, ncol=2)
 
-    figure.suptitle("XResNet-101 baseline training", fontsize=14, fontweight="bold")
+    figure.suptitle(args.title, fontsize=14, fontweight="bold")
     figure.tight_layout()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(args.output, bbox_inches="tight")

@@ -1,0 +1,50 @@
+{
+  "run": {
+    "model": "qumphy_xresnet1d50",
+    "parameters": 886690,
+    "dataset": "PulseDB VitalDB-derived calibration-free subset",
+    "protocol": "subject-disjoint calibration-free",
+    "train_windows": 412920,
+    "validation_windows": 52560,
+    "test_windows": 57600,
+    "epochs": 50,
+    "best_epoch": 4,
+    "checkpoint_metric": "validation_sbp_mae",
+    "device": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "runtime_seconds": 8663
+  },
+  "training": {
+    "batch_size": 512,
+    "gradient_accumulation_steps": 1,
+    "target_standardization": false,
+    "signal_normalization": "none",
+    "optimizer": "AdamW",
+    "learning_rate": 0.001,
+    "weight_decay": 0.001,
+    "dropout": 0.5,
+    "mixed_precision": true
+  },
+  "mean_predictor_test": {
+    "sbp_mae": 14.9403,
+    "sbp_rmse": 18.7248,
+    "dbp_mae": 9.4314,
+    "dbp_rmse": 11.8744,
+    "mean_mae": 12.1859
+  },
+  "xresnet50_test": {
+    "sbp_mae": 12.4922,
+    "sbp_rmse": 16.0238,
+    "sbp_bias": -1.6078,
+    "sbp_error_std": 15.9431,
+    "dbp_mae": 8.0594,
+    "dbp_rmse": 10.1836,
+    "dbp_bias": -1.6341,
+    "dbp_error_std": 10.0517,
+    "mean_mae": 10.2758
+  },
+  "relative_mean_mae_improvement_percent": 15.7,
+  "published_xresnet1d50_vital_calibration_free": {
+    "sbp_mae": 12.40,
+    "dbp_mae": 7.84
+  }
+}

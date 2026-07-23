@@ -145,6 +145,7 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         split: str,
         normalization: str = "per_segment_zscore",
         label_filter: dict[str, float | bool] | None = None,
+        split_filename: str = "split.npy",
     ) -> None:
         if split not in SPLIT_TO_CODE:
             raise ValueError(f"Unknown split {split!r}; expected train, val, or test")
@@ -158,7 +159,7 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         count = int(self.meta["n_samples"])
         self.ppg = np.load(self.root / "ppg.npy", mmap_mode="r")
         self.labels = np.load(self.root / "labels.npy", mmap_mode="r")
-        split_codes = np.load(self.root / "split.npy", mmap_mode="r")
+        split_codes = np.load(self.root / split_filename, mmap_mode="r")
         selected = split_codes[:count] == SPLIT_TO_CODE[split]
         if label_filter:
             labels = self.labels[:count]
