@@ -140,3 +140,42 @@ other.
 | B6-2 | `configs/pulsedb_b6_gated_task_heads.yaml` |
 | B6-3 | `configs/pulsedb_b6_independent_heads_control.yaml` |
 | B6-4 | `configs/pulsedb_b6_concat_attention_task_heads.yaml` |
+
+## M series: physiology-guided multi-task learning
+
+The M series tests whether physiological supervision can improve the shared
+PPG representation. The model input remains PPG and its numerical first
+derivative (VPG). Synchronized ECG and age metadata are used only to construct
+training labels; they are not inference inputs.
+
+- M0: BP-only control using the B6-4 backbone.
+- M1: M0 plus heart-rate regression.
+- M2: M0 plus age-group classification.
+- M3: M0 plus heart-rate and age-group tasks.
+- M4: M3 plus low/normal/high BP-pattern classification.
+
+All experiments use seed 42 and the same subject-disjoint validation and fixed
+CalFree test splits.
+
+| ID | Auxiliary tasks | Best validation MAE | CalFree SBP MAE | CalFree DBP MAE | CalFree mean MAE |
+|---|---|---:|---:|---:|---:|
+| **M0** | None | 10.579 | **12.150** | **7.886** | **10.018** |
+| M1 | Heart rate | 10.605 | 12.689 | 8.266 | 10.477 |
+| M2 | Age group | 10.603 | 13.026 | 8.016 | 10.521 |
+| M3 | Heart rate + age group | 10.580 | 12.797 | 8.213 | 10.505 |
+| M4 | Heart rate + age group + BP pattern | 10.597 | 12.299 | 8.434 | 10.366 |
+
+The auxiliary predictions were meaningful: M4 achieved 1.765 bpm heart-rate
+MAE, 58.2% age-group accuracy, and 59.2% BP-pattern accuracy on the test set.
+However, every hard-sharing variant reduced BP accuracy relative to M0. The
+current evidence therefore supports retaining M0/B6-4 and treating gradient
+conflict management, task-weight scheduling, or partially shared encoders as
+future controlled experiments.
+
+| Experiment | Configuration |
+|---|---|
+| M0 | `configs/pulsedb_m0_bp_only.yaml` |
+| M1 | `configs/pulsedb_m1_heart_rate.yaml` |
+| M2 | `configs/pulsedb_m2_age_group.yaml` |
+| M3 | `configs/pulsedb_m3_hr_age.yaml` |
+| M4 | `configs/pulsedb_m4_hr_age_bpclass.yaml` |

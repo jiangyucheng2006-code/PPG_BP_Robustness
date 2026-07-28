@@ -26,6 +26,12 @@ def main() -> None:
         help="Run one config with an explicit random seed override",
     )
     parser.add_argument("--status", type=Path, required=True)
+    parser.add_argument(
+        "--trainer",
+        type=Path,
+        default=Path("scripts/train_baseline.py"),
+        help="Training entry point, relative to the repository root",
+    )
     args = parser.parse_args()
     scheduled_runs: list[tuple[str, str, int | None]] = [
         (config, output, None) for config, output in (args.run or [])
@@ -63,7 +69,7 @@ def main() -> None:
             command = [
                 sys.executable,
                 "-u",
-                "scripts/train_baseline.py",
+                str(args.trainer),
                 "--config",
                 str(config),
                 "--output",

@@ -210,6 +210,78 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return torch.from_numpy(channels), torch.from_numpy(target)
 
 
+class PulseDBAuxiliaryDataset(PulseDBMemmapDataset):
+    """PulseDB arrays with optional training-only physiological labels.
+
+    The model input is still PPG only. Auxiliary labels are supervision for
+    representation learning and are never concatenated with the input signal.
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        split: str,
+        normalization: str = "per_segment_zscore",
+        label_filter: dict[str, float | bool] | None = None,
+        split_filename: str = "split.npy",
+        input_representation: str = "ppg",
+        derivative_normalization: str = "per_segment_zscore",
+        auxiliary_tasks: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(
+            root,
+            split,
+            normalization,
+            label_filter,
+            split_filename,
+            input_representation,
+            derivative_normalization,
+        )
+        supported = {"heart_rate", "age_group", "bp_class"}
+        unknown = set(auxiliary_tasks).difference(supported)
+        if unknown:
+            raise ValueError(f"Unsupported auxiliary tasks: {sorted(unknown)}")
+        self.auxiliary_tasks = tuple(auxiliary_tasks)
+        self.age = (
+            np.load(self.root / "age.npy", mmap_mode="r")
+            if "age_group" in self.auxiliary_tasks
+            else None
+        )
+        self.heart_rate = (
+            np.load(self.root / "heart_rate.npy", mmap_mode="r")
+            if "heart_rate" in self.auxiliary_tasks
+            else None
+        )
+        self.heart_rate_valid = (
+            np.load(self.root / "heart_rate_valid.npy", mmap_mode="r")
+            if "heart_rate" in self.auxiliary_tasks
+            else None
+        )
+
+    def __getitem__(
+        self,
+        item: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
+        signal, target = super().__getitem__(item)
+        index = int(self.indices[item])
+        auxiliary: dict[str, torch.Tensor] = {}
+        if self.age is not None:
+            auxiliary["age"] = torch.tensor(
+                float(self.age[index]),
+                dtype=torch.float32,
+            )
+        if self.heart_rate is not None and self.heart_rate_valid is not None:
+            auxiliary["heart_rate"] = torch.tensor(
+                float(self.heart_rate[index]),
+                dtype=torch.float32,
+            )
+            auxiliary["heart_rate_valid"] = torch.tensor(
+                bool(self.heart_rate_valid[index]),
+                dtype=torch.bool,
+            )
+        return signal, target, auxiliary
+
+
 def _segment_zscore(signal: np.ndarray) -> np.ndarray:
     return (signal - signal.mean()) / max(float(signal.std()), 1e-6)
 

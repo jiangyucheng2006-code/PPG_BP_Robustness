@@ -1,0 +1,61 @@
+{
+  "dataset": "PulseDB v2.0 VitalDB supplementary subsets",
+  "protocol": "subject-disjoint validation; fixed calibration-free test",
+  "seed": 42,
+  "input_at_inference": "PPG and PPG-derived VPG only",
+  "experiments": {
+    "M0": {
+      "tasks": [],
+      "completed_epochs": 9,
+      "best_epoch": 3,
+      "best_validation_mean_mae": 10.579128587264087,
+      "test_sbp_mae": 12.149713712798224,
+      "test_dbp_mae": 7.886348210838106,
+      "test_mean_mae": 10.018030961818166
+    },
+    "M1": {
+      "tasks": ["heart_rate"],
+      "completed_epochs": 7,
+      "best_epoch": 1,
+      "best_validation_mean_mae": 10.604982017599829,
+      "test_sbp_mae": 12.688964031934738,
+      "test_dbp_mae": 8.265649383664131,
+      "test_mean_mae": 10.477306707799436,
+      "heart_rate_mae_bpm": 1.9436511142711992
+    },
+    "M2": {
+      "tasks": ["age_group"],
+      "completed_epochs": 7,
+      "best_epoch": 1,
+      "best_validation_mean_mae": 10.603318639142692,
+      "test_sbp_mae": 13.026282744937474,
+      "test_dbp_mae": 8.015913800729646,
+      "test_mean_mae": 10.521098272833559,
+      "age_group_accuracy": 0.5528993055555556
+    },
+    "M3": {
+      "tasks": ["heart_rate", "age_group"],
+      "completed_epochs": 7,
+      "best_epoch": 1,
+      "best_validation_mean_mae": 10.58004506868133,
+      "test_sbp_mae": 12.796897806061638,
+      "test_dbp_mae": 8.212845937146081,
+      "test_mean_mae": 10.50487187160386,
+      "heart_rate_mae_bpm": 2.145972356320835,
+      "age_group_accuracy": 0.5825347222222222
+    },
+    "M4": {
+      "tasks": ["heart_rate", "age_group", "bp_class"],
+      "completed_epochs": 8,
+      "best_epoch": 2,
+      "best_validation_mean_mae": 10.59651242728647,
+      "test_sbp_mae": 12.299067937665516,
+      "test_dbp_mae": 8.433759624494447,
+      "test_mean_mae": 10.36641378107998,
+      "heart_rate_mae_bpm": 1.7648114053350308,
+      "age_group_accuracy": 0.5815104166666667,
+      "bp_class_accuracy": 0.5924479166666666
+    }
+  },
+  "decision": "Retain M0/B6-4; direct hard sharing did not improve BP accuracy."
+}

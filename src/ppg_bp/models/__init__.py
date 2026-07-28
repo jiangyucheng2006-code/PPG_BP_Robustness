@@ -20,10 +20,24 @@ from .qumphy_xresnet1d import (
     qumphy_xresnet1d101,
 )
 from .xresnet1d import XResNet1D, xresnet1d50, xresnet1d101
+from .multitask import PhysiologyGuidedMultiTaskModel
 
 
 def build_model(model_config: dict):
     """Build a project model from the YAML/checkpoint model section."""
+
+    model_name = str(model_config["name"])
+    if model_name == "physiology_guided_multitask":
+        backbone = build_model(model_config["backbone"])
+        return PhysiologyGuidedMultiTaskModel(
+            backbone,
+            tuple(model_config.get("tasks", ())),
+            feature_dim=int(model_config.get("feature_dim", 512)),
+            age_classes=int(model_config.get("age_classes", 4)),
+            bp_classes=int(model_config.get("bp_classes", 3)),
+            hidden_features=int(model_config.get("hidden_features", 128)),
+            auxiliary_dropout=float(model_config.get("auxiliary_dropout", 0.2)),
+        )
 
     factories = {
         "xresnet1d": {50: xresnet1d50, 101: xresnet1d101},
@@ -48,7 +62,6 @@ def build_model(model_config: dict):
             50: qumphy_concat_attention_derivative_xresnet1d50
         },
     }
-    model_name = str(model_config["name"])
     depth = int(model_config["depth"])
     if model_name not in factories:
         raise ValueError(f"Unsupported model name: {model_name}")
@@ -88,6 +101,7 @@ __all__ = [
     "qumphy_xresnet1d50",
     "qumphy_xresnet1d101",
     "XResNet1D",
+    "PhysiologyGuidedMultiTaskModel",
     "xresnet1d50",
     "xresnet1d101",
     "build_model",
