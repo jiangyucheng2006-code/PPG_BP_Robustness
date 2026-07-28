@@ -7,7 +7,11 @@ from ppg_bp.data import PulseDBMemmapDataset, read_pulsedb_subject
 
 
 def test_memmap_dataset(tmp_path) -> None:
-    np.save(tmp_path / "ppg.npy", np.arange(4 * 1250, dtype=np.float32).reshape(4, 1250))
+    time = np.linspace(0, 10, 1250, dtype=np.float32)
+    signals = np.stack(
+        [np.sin((index + 1) * 2 * np.pi * time) for index in range(4)]
+    ).astype(np.float32)
+    np.save(tmp_path / "ppg.npy", signals)
     np.save(tmp_path / "labels.npy", np.array([[120, 80], [121, 81], [122, 82], [123, 83]], dtype=np.float32))
     np.save(tmp_path / "split.npy", np.array([0, 0, 1, 2], dtype=np.uint8))
     (tmp_path / "dataset_meta.json").write_text(
@@ -37,6 +41,18 @@ def test_memmap_dataset(tmp_path) -> None:
     )
     assert len(alternate) == 2
     assert alternate[0][1].tolist() == [121.0, 81.0]
+
+    derivative = PulseDBMemmapDataset(
+        tmp_path,
+        "train",
+        input_representation="ppg_vpg_apg",
+    )
+    derivative_signal, _ = derivative[0]
+    assert derivative_signal.shape == (3, 1250)
+    assert abs(float(derivative_signal[1].mean())) < 1e-5
+    assert abs(float(derivative_signal[2].mean())) < 1e-5
+    assert abs(float(derivative_signal[1].std()) - 1.0) < 1e-3
+    assert abs(float(derivative_signal[2].std()) - 1.0) < 1e-3
 
 
 def test_direct_single_segment_matlab_layout(tmp_path) -> None:
