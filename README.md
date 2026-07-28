@@ -43,6 +43,19 @@ Values are in mmHg. Training curves, run settings, and the complete metric
 summary are available in
 [`results/qumphy_xresnet50_vital_calibfree`](results/qumphy_xresnet50_vital_calibfree).
 
+## Experiment status
+
+The baseline has since been extended with multi-scale morphology, PPG-derived
+VPG/APG channels, train-only label-density weighting, independent SBP/DBP
+regression heads, and controlled attention variants. Each change, result, and
+retention decision is recorded in
+[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md).
+
+The current reproducible CalFree candidate is the multi-scale PPG+VPG model
+with moderate label-density weighting and separate SBP/DBP heads. The
+non-competitive concatenation-attention variant achieved a 10.018 mmHg
+single-seed mean MAE and is awaiting multi-seed confirmation.
+
 ## Installation
 
 Python 3.10 or later is required.

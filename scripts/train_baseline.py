@@ -17,14 +17,9 @@ from tqdm import tqdm
 
 from ppg_bp.data.pulsedb import PulseDBMemmapDataset
 from ppg_bp.models import (
-    qumphy_attention_multiscale_xresnet1d50,
-    qumphy_multiscale_xresnet1d50,
-    qumphy_task_attention_multiscale_xresnet1d50,
-    qumphy_xresnet1d50,
-    qumphy_xresnet1d101,
-    xresnet1d50,
-    xresnet1d101,
+    build_model,
 )
+from ppg_bp.training.losses import build_regression_loss
 from ppg_bp.training.metrics import regression_metrics
 
 
@@ -49,7 +44,7 @@ def evaluate(
     device: torch.device,
     target_mean: torch.Tensor,
     target_std: torch.Tensor,
-) -> dict[str, float]:
+) -> dict[str, float | bool | str]:
     model.eval()
     predictions: list[np.ndarray] = []
     targets: list[np.ndarray] = []
@@ -64,9 +59,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("outputs/baseline"))
+    parser.add_argument(
+        "--seed",
+        type=int,
+        help="Override the config seed for a reproducibility sweep",
+    )
     parser.add_argument("--resume", action="store_true", help="Resume from output/last.pt when available")
     args = parser.parse_args()
     config = load_config(args.config)
+    if args.seed is not None:
+        config["seed"] = args.seed
 
     seed = int(config["seed"])
     random.seed(seed)
@@ -80,6 +82,10 @@ def main() -> None:
     normalization = config["data"]["normalization"]
     label_filter = config["data"].get("label_filter")
     split_filename = str(config["data"].get("split_filename", "split.npy"))
+    input_representation = str(config["data"].get("input_representation", "ppg"))
+    derivative_normalization = str(
+        config["data"].get("derivative_normalization", "per_segment_zscore")
+    )
     datasets = {
         name: PulseDBMemmapDataset(
             root,
@@ -87,6 +93,8 @@ def main() -> None:
             normalization,
             label_filter,
             split_filename=split_filename,
+            input_representation=input_representation,
+            derivative_normalization=derivative_normalization,
         )
         for name in ("train", "val", "test")
     }
@@ -119,44 +127,17 @@ def main() -> None:
         target_mean = torch.zeros(2, dtype=torch.float32, device=device)
         target_std = torch.ones(2, dtype=torch.float32, device=device)
 
-    depth = int(config["model"]["depth"])
     model_name = str(config["model"]["name"])
-    factories = {
-        "xresnet1d": {50: xresnet1d50, 101: xresnet1d101},
-        "qumphy_xresnet1d": {50: qumphy_xresnet1d50, 101: qumphy_xresnet1d101},
-        "qumphy_multiscale_xresnet1d": {50: qumphy_multiscale_xresnet1d50},
-        "qumphy_attention_multiscale_xresnet1d": {
-            50: qumphy_attention_multiscale_xresnet1d50
-        },
-        "qumphy_task_attention_multiscale_xresnet1d": {
-            50: qumphy_task_attention_multiscale_xresnet1d50
-        },
-    }
-    if model_name not in factories:
-        raise ValueError(f"Unsupported model name: {model_name}")
-    factory = factories[model_name].get(depth)
-    if factory is None:
-        raise ValueError("Supported XResNet depths are 50 and 101")
-    model = factory(
-        input_channels=int(config["model"].get("input_channels", 1)),
-        outputs=int(config["model"].get("outputs", 2)),
-        dropout=float(config["model"].get("dropout", 0.5 if model_name == "qumphy_xresnet1d" else 0.2)),
-    ).to(device)
+    model = build_model(config["model"]).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(config["training"]["learning_rate"]),
         weight_decay=float(config["training"]["weight_decay"]),
     )
-    loss_config = config["training"].get("loss", {"name": "mse"})
-    if isinstance(loss_config, str):
-        loss_config = {"name": loss_config}
-    loss_name = str(loss_config.get("name", "mse")).lower()
-    if loss_name == "mse":
-        criterion: nn.Module = nn.MSELoss()
-    elif loss_name == "huber":
-        criterion = nn.HuberLoss(delta=float(loss_config.get("delta", 5.0)))
-    else:
-        raise ValueError(f"Unsupported loss: {loss_name}")
+    criterion, loss_name, loss_metadata = build_regression_loss(
+        config["training"], train_targets
+    )
+    criterion = criterion.to(device)
 
     scheduler_config = config["training"].get("scheduler", {"name": "constant"})
     if isinstance(scheduler_config, str):
@@ -214,7 +195,7 @@ def main() -> None:
             with torch.autocast(device_type=device.type, enabled=use_amp):
                 predictions = model(signals)
                 normalized_labels = (labels - target_mean) / target_std
-                loss = criterion(predictions, normalized_labels)
+                loss = criterion(predictions, normalized_labels, labels)
                 scaled_loss = loss / accumulation_steps
             scaler.scale(scaled_loss).backward()
             if step % accumulation_steps == 0 or step == len(train_loader):
@@ -291,6 +272,7 @@ def main() -> None:
         "completed_epochs": len(history),
         "stopped_early": len(history) < int(config["training"]["epochs"]),
         "loss": loss_name,
+        "loss_metadata": loss_metadata,
         "scheduler": scheduler_name,
         "target_standardization": standardize_targets,
         "train_target_mean": train_target_mean.cpu().tolist(),

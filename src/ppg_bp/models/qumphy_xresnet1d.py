@@ -159,6 +159,144 @@ class AdaptiveScaleAttentionStem(MultiScaleInputStem):
         return self.fusion(torch.cat(weighted, dim=1))
 
 
+class GatedPPGVPGStem(nn.Module):
+    """Extract PPG and VPG features separately, then fuse them with attention."""
+
+    def __init__(
+        self,
+        *,
+        branch_channels: int = 16,
+        output_channels: int = 32,
+        kernel_sizes: Sequence[int] = (3, 7, 15),
+        attention_hidden: int = 64,
+    ) -> None:
+        super().__init__()
+        self.ppg_stem = MultiScaleInputStem(
+            1,
+            branch_channels=branch_channels,
+            output_channels=output_channels,
+            kernel_sizes=kernel_sizes,
+        )
+        self.vpg_stem = MultiScaleInputStem(
+            1,
+            branch_channels=branch_channels,
+            output_channels=output_channels,
+            kernel_sizes=kernel_sizes,
+        )
+        descriptor_channels = output_channels * 4
+        self.output_channels = output_channels
+        self.gate = nn.Sequential(
+            nn.Linear(descriptor_channels, attention_hidden),
+            nn.ReLU(),
+            nn.Linear(attention_hidden, output_channels * 2),
+        )
+
+    def reset_gate_to_equal(self) -> None:
+        output = self.gate[-1]
+        assert isinstance(output, nn.Linear)
+        nn.init.zeros_(output.weight)
+        nn.init.zeros_(output.bias)
+
+    def extract_branch_features(
+        self,
+        inputs: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if inputs.ndim != 3 or inputs.shape[1] != 2:
+            raise ValueError("Gated PPG/VPG stem expects input shape [batch, 2, time]")
+        return self.ppg_stem(inputs[:, 0:1]), self.vpg_stem(inputs[:, 1:2])
+
+    def branch_weights(
+        self,
+        ppg_features: torch.Tensor,
+        vpg_features: torch.Tensor,
+    ) -> torch.Tensor:
+        descriptor = torch.cat(
+            (
+                ppg_features.mean(dim=-1),
+                ppg_features.amax(dim=-1),
+                vpg_features.mean(dim=-1),
+                vpg_features.amax(dim=-1),
+            ),
+            dim=1,
+        )
+        logits = self.gate(descriptor).view(
+            descriptor.shape[0], 2, self.output_channels
+        )
+        return torch.softmax(logits, dim=1)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        ppg_features, vpg_features = self.extract_branch_features(inputs)
+        weights = self.branch_weights(ppg_features, vpg_features)
+        return (
+            ppg_features * weights[:, 0, :, None]
+            + vpg_features * weights[:, 1, :, None]
+        )
+
+
+class ConcatenatedPPGVPGAttentionStem(nn.Module):
+    """Preserve both derivative branches before channel-attentive fusion."""
+
+    def __init__(
+        self,
+        *,
+        branch_channels: int = 16,
+        output_channels: int = 32,
+        kernel_sizes: Sequence[int] = (3, 7, 15),
+        attention_hidden: int = 64,
+    ) -> None:
+        super().__init__()
+        self.ppg_stem = MultiScaleInputStem(
+            1,
+            branch_channels=branch_channels,
+            output_channels=output_channels,
+            kernel_sizes=kernel_sizes,
+        )
+        self.vpg_stem = MultiScaleInputStem(
+            1,
+            branch_channels=branch_channels,
+            output_channels=output_channels,
+            kernel_sizes=kernel_sizes,
+        )
+        concatenated_channels = output_channels * 2
+        self.channel_attention = nn.Sequential(
+            nn.Linear(concatenated_channels * 2, attention_hidden),
+            nn.ReLU(),
+            nn.Linear(attention_hidden, concatenated_channels),
+        )
+        self.fusion = BenchmarkConvLayer(
+            concatenated_channels,
+            output_channels,
+            1,
+        )
+
+    def reset_attention_to_identity(self) -> None:
+        output = self.channel_attention[-1]
+        assert isinstance(output, nn.Linear)
+        nn.init.zeros_(output.weight)
+        nn.init.zeros_(output.bias)
+
+    def extract_concatenated_features(self, inputs: torch.Tensor) -> torch.Tensor:
+        if inputs.ndim != 3 or inputs.shape[1] != 2:
+            raise ValueError(
+                "Concatenated PPG/VPG attention expects input shape [batch, 2, time]"
+            )
+        ppg_features = self.ppg_stem(inputs[:, 0:1])
+        vpg_features = self.vpg_stem(inputs[:, 1:2])
+        return torch.cat((ppg_features, vpg_features), dim=1)
+
+    def attention_scale(self, features: torch.Tensor) -> torch.Tensor:
+        descriptor = torch.cat(
+            (features.mean(dim=-1), features.amax(dim=-1)),
+            dim=1,
+        )
+        return 0.5 + torch.sigmoid(self.channel_attention(descriptor))
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = self.extract_concatenated_features(inputs)
+        attended = features * self.attention_scale(features)[:, :, None]
+        return self.fusion(attended)
+
+
 class QumphyXResNet1D(nn.Module):
     """Benchmark-compatible 1-D XResNet for two-output BP regression."""
 
@@ -341,6 +479,170 @@ class QumphyTaskAttentionXResNet1D(QumphyXResNet1D):
         return torch.cat([head(features) for head in self.task_heads], dim=1)
 
 
+class QumphyGatedDerivativeXResNet1D(QumphyXResNet1D):
+    """Multiscale PPG/VPG branches with gated fusion and optional task heads."""
+
+    def __init__(
+        self,
+        layers: Sequence[int],
+        *,
+        input_channels: int = 2,
+        outputs: int = 2,
+        dropout: float = 0.5,
+        independent_heads: bool = False,
+    ) -> None:
+        if input_channels != 2:
+            raise ValueError("Gated derivative model requires PPG and VPG channels")
+        if outputs != 2:
+            raise ValueError("Gated derivative BP model requires exactly two outputs")
+        super().__init__(
+            layers,
+            input_channels=1,
+            outputs=outputs,
+            dropout=dropout,
+            multiscale_stem=True,
+        )
+        gated_stem = GatedPPGVPGStem()
+        for module in gated_stem.modules():
+            if isinstance(module, (nn.Conv1d, nn.Linear)):
+                nn.init.kaiming_normal_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        gated_stem.reset_gate_to_equal()
+        self.stem[0] = gated_stem
+        self.independent_heads = independent_heads
+
+        if independent_heads:
+            self.head = nn.Identity()
+            self.target_heads = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.BatchNorm1d(512),
+                        nn.Dropout(dropout),
+                        nn.Linear(512, 1),
+                    )
+                    for _ in range(2)
+                ]
+            )
+            for target_head in self.target_heads:
+                output = target_head[-1]
+                assert isinstance(output, nn.Linear)
+                nn.init.kaiming_normal_(output.weight)
+                nn.init.zeros_(output.bias)
+
+    @property
+    def gated_stem(self) -> GatedPPGVPGStem:
+        stem = self.stem[0]
+        assert isinstance(stem, GatedPPGVPGStem)
+        return stem
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = self.forward_features(inputs)
+        if not self.independent_heads:
+            return self.head(features)
+        return torch.cat([head(features) for head in self.target_heads], dim=1)
+
+
+class QumphyIndependentHeadsXResNet1D(QumphyXResNet1D):
+    """Multiscale XResNet with simple, separate SBP and DBP regressors."""
+
+    def __init__(
+        self,
+        layers: Sequence[int],
+        *,
+        input_channels: int = 2,
+        outputs: int = 2,
+        dropout: float = 0.5,
+    ) -> None:
+        if outputs != 2:
+            raise ValueError("Independent BP heads require exactly two outputs")
+        super().__init__(
+            layers,
+            input_channels=input_channels,
+            outputs=outputs,
+            dropout=dropout,
+            multiscale_stem=True,
+        )
+        self.head = nn.Identity()
+        self.target_heads = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.BatchNorm1d(512),
+                    nn.Dropout(dropout),
+                    nn.Linear(512, 1),
+                )
+                for _ in range(2)
+            ]
+        )
+        for target_head in self.target_heads:
+            output = target_head[-1]
+            assert isinstance(output, nn.Linear)
+            nn.init.kaiming_normal_(output.weight)
+            nn.init.zeros_(output.bias)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = self.forward_features(inputs)
+        return torch.cat([head(features) for head in self.target_heads], dim=1)
+
+
+class QumphyConcatAttentionDerivativeXResNet1D(QumphyXResNet1D):
+    """Concatenated PPG/VPG attention followed by separate BP target heads."""
+
+    def __init__(
+        self,
+        layers: Sequence[int],
+        *,
+        input_channels: int = 2,
+        outputs: int = 2,
+        dropout: float = 0.5,
+    ) -> None:
+        if input_channels != 2:
+            raise ValueError("Derivative attention requires PPG and VPG channels")
+        if outputs != 2:
+            raise ValueError("Independent BP heads require exactly two outputs")
+        super().__init__(
+            layers,
+            input_channels=1,
+            outputs=outputs,
+            dropout=dropout,
+            multiscale_stem=True,
+        )
+        attention_stem = ConcatenatedPPGVPGAttentionStem()
+        for module in attention_stem.modules():
+            if isinstance(module, (nn.Conv1d, nn.Linear)):
+                nn.init.kaiming_normal_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        attention_stem.reset_attention_to_identity()
+        self.stem[0] = attention_stem
+        self.head = nn.Identity()
+        self.target_heads = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.BatchNorm1d(512),
+                    nn.Dropout(dropout),
+                    nn.Linear(512, 1),
+                )
+                for _ in range(2)
+            ]
+        )
+        for target_head in self.target_heads:
+            output = target_head[-1]
+            assert isinstance(output, nn.Linear)
+            nn.init.kaiming_normal_(output.weight)
+            nn.init.zeros_(output.bias)
+
+    @property
+    def attention_stem(self) -> ConcatenatedPPGVPGAttentionStem:
+        stem = self.stem[0]
+        assert isinstance(stem, ConcatenatedPPGVPGAttentionStem)
+        return stem
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        features = self.forward_features(inputs)
+        return torch.cat([head(features) for head in self.target_heads], dim=1)
+
+
 def qumphy_xresnet1d50(
     *,
     input_channels: int = 1,
@@ -406,6 +708,64 @@ def qumphy_task_attention_multiscale_xresnet1d50(
     dropout: float = 0.5,
 ) -> QumphyTaskAttentionXResNet1D:
     return QumphyTaskAttentionXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
+    )
+
+
+def qumphy_gated_derivative_xresnet1d50(
+    *,
+    input_channels: int = 2,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyGatedDerivativeXResNet1D:
+    return QumphyGatedDerivativeXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
+        independent_heads=False,
+    )
+
+
+def qumphy_gated_derivative_task_heads_xresnet1d50(
+    *,
+    input_channels: int = 2,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyGatedDerivativeXResNet1D:
+    return QumphyGatedDerivativeXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
+        independent_heads=True,
+    )
+
+
+def qumphy_independent_heads_multiscale_xresnet1d50(
+    *,
+    input_channels: int = 2,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyIndependentHeadsXResNet1D:
+    return QumphyIndependentHeadsXResNet1D(
+        (3, 4, 6, 3),
+        input_channels=input_channels,
+        outputs=outputs,
+        dropout=dropout,
+    )
+
+
+def qumphy_concat_attention_derivative_xresnet1d50(
+    *,
+    input_channels: int = 2,
+    outputs: int = 2,
+    dropout: float = 0.5,
+) -> QumphyConcatAttentionDerivativeXResNet1D:
+    return QumphyConcatAttentionDerivativeXResNet1D(
         (3, 4, 6, 3),
         input_channels=input_channels,
         outputs=outputs,

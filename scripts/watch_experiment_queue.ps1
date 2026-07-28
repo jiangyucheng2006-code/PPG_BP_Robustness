@@ -6,14 +6,34 @@ $queues = @(
     @{ Name = "B1/B2 queue"; Path = (Join-Path $outputRoot "b1_b2_queue\status.json") },
     @{ Name = "B2 controlled queue"; Path = (Join-Path $outputRoot "b2_control_queue\status.json") },
     @{ Name = "B3 attention queue"; Path = (Join-Path $outputRoot "b3_attention_queue\status.json") },
-    @{ Name = "B3-v2 task attention queue"; Path = (Join-Path $outputRoot "b3v2_attention_queue\status.json") }
+    @{ Name = "B3-v2 task attention queue"; Path = (Join-Path $outputRoot "b3v2_attention_queue\status.json") },
+    @{ Name = "B4 derivative queue"; Path = (Join-Path $outputRoot "b4_derivative_queue\status.json") },
+    @{ Name = "B5 density-weighted queue"; Path = (Join-Path $outputRoot "b5_density_queue\status.json") },
+    @{ Name = "B6 gated-fusion queue"; Path = (Join-Path $outputRoot "b6_gated_queue\status.json") },
+    @{ Name = "B6 heads control"; Path = (Join-Path $outputRoot "b6_heads_control_queue\status.json") },
+    @{ Name = "B6 multi-seed sweep"; Path = (Join-Path $outputRoot "b6_seed_sweep_queue\status.json") },
+    @{ Name = "B6 concat-attention screen"; Path = (Join-Path $outputRoot "b6_concat_attention_queue\status.json") }
 )
 $runs = @(
     @{ Name = "B1"; Directory = "pulsedb_b1_huber_cosine" },
     @{ Name = "B2"; Directory = "pulsedb_b2_multiscale" },
     @{ Name = "B2 controlled"; Directory = "pulsedb_b2_multiscale_control" },
     @{ Name = "B3 attention"; Directory = "pulsedb_b3_attention_multiscale_control" },
-    @{ Name = "B3-v2 task attention"; Directory = "pulsedb_b3v2_task_attention_control" }
+    @{ Name = "B3-v2 task attention"; Directory = "pulsedb_b3v2_task_attention_control" },
+    @{ Name = "B4 PPG+VPG"; Directory = "pulsedb_b4_vpg_control" },
+    @{ Name = "B4 PPG+VPG+APG"; Directory = "pulsedb_b4_vpg_apg_control" },
+    @{ Name = "B5-1 moderate balance"; Directory = "pulsedb_b5_density_moderate" },
+    @{ Name = "B5-2 strong balance"; Directory = "pulsedb_b5_density_strong" },
+    @{ Name = "B6-1 gated PPG/VPG"; Directory = "pulsedb_b6_gated_fusion" },
+    @{ Name = "B6-2 gated + task heads"; Directory = "pulsedb_b6_gated_task_heads" },
+    @{ Name = "B6-3 task heads only"; Directory = "pulsedb_b6_independent_heads_control" },
+    @{ Name = "B5-1 seed 7"; Directory = "pulsedb_b5_density_moderate_seed7" },
+    @{ Name = "B6-2 attention seed 7"; Directory = "pulsedb_b6_gated_task_heads_seed7" },
+    @{ Name = "B6-3 heads seed 7"; Directory = "pulsedb_b6_independent_heads_control_seed7" },
+    @{ Name = "B5-1 seed 2026"; Directory = "pulsedb_b5_density_moderate_seed2026" },
+    @{ Name = "B6-2 attention seed 2026"; Directory = "pulsedb_b6_gated_task_heads_seed2026" },
+    @{ Name = "B6-3 heads seed 2026"; Directory = "pulsedb_b6_independent_heads_control_seed2026" },
+    @{ Name = "B6-4 concat attention"; Directory = "pulsedb_b6_concat_attention_task_heads" }
 )
 
 while ($true) {

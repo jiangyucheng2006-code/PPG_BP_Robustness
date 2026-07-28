@@ -10,4 +10,7 @@ def test_regression_metrics() -> None:
     assert metrics["sbp_mae"] == 3.0
     assert metrics["dbp_mae"] == 2.0
     assert metrics["mean_mae"] == 2.5
-
+    assert metrics["sbp_aami_numerical_pass"] is True
+    assert metrics["dbp_aami_numerical_pass"] is True
+    assert metrics["sbp_within_5_pct"] == 100.0
+    assert metrics["dbp_bhs_grade"] == "A"

@@ -20,6 +20,11 @@ from torch.utils.data import Dataset
 
 
 SPLIT_TO_CODE = {"train": 0, "val": 1, "test": 2}
+INPUT_REPRESENTATIONS = {
+    "ppg": 1,
+    "ppg_vpg": 2,
+    "ppg_vpg_apg": 3,
+}
 
 
 @dataclass(frozen=True)
@@ -146,11 +151,22 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         normalization: str = "per_segment_zscore",
         label_filter: dict[str, float | bool] | None = None,
         split_filename: str = "split.npy",
+        input_representation: str = "ppg",
+        derivative_normalization: str = "per_segment_zscore",
     ) -> None:
         if split not in SPLIT_TO_CODE:
             raise ValueError(f"Unknown split {split!r}; expected train, val, or test")
         if normalization not in {"none", "per_segment_zscore"}:
             raise ValueError(f"Unsupported normalization: {normalization}")
+        if input_representation not in INPUT_REPRESENTATIONS:
+            raise ValueError(
+                f"Unsupported input representation: {input_representation}; "
+                f"expected one of {sorted(INPUT_REPRESENTATIONS)}"
+            )
+        if derivative_normalization not in {"none", "per_segment_zscore"}:
+            raise ValueError(
+                f"Unsupported derivative normalization: {derivative_normalization}"
+            )
 
         self.root = Path(root)
         with (self.root / "dataset_meta.json").open("r", encoding="utf-8") as stream:
@@ -171,6 +187,8 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
                 selected &= labels[:, 0] > labels[:, 1]
         self.indices = np.flatnonzero(selected)
         self.normalization = normalization
+        self.input_representation = input_representation
+        self.derivative_normalization = derivative_normalization
 
         if self.ppg.shape[1] != int(self.meta["window_samples"]):
             raise ValueError("PPG array shape does not match dataset_meta.json")
@@ -183,5 +201,48 @@ class PulseDBMemmapDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         signal = np.asarray(self.ppg[index], dtype=np.float32).copy()
         target = np.asarray(self.labels[index], dtype=np.float32).copy()
         if self.normalization == "per_segment_zscore":
-            signal = (signal - signal.mean()) / max(float(signal.std()), 1e-6)
-        return torch.from_numpy(signal[None, :]), torch.from_numpy(target)
+            signal = _segment_zscore(signal)
+        channels = ppg_representation(
+            signal,
+            self.input_representation,
+            derivative_normalization=self.derivative_normalization,
+        )
+        return torch.from_numpy(channels), torch.from_numpy(target)
+
+
+def _segment_zscore(signal: np.ndarray) -> np.ndarray:
+    return (signal - signal.mean()) / max(float(signal.std()), 1e-6)
+
+
+def ppg_representation(
+    signal: np.ndarray,
+    representation: str,
+    *,
+    derivative_normalization: str = "per_segment_zscore",
+) -> np.ndarray:
+    """Build PPG/VPG/APG channels from one PPG waveform.
+
+    VPG and APG are numerical first and second derivatives of the same optical
+    signal, so these representations remain single-sensor PPG inputs.
+    """
+
+    if representation not in INPUT_REPRESENTATIONS:
+        raise ValueError(f"Unsupported input representation: {representation}")
+    if derivative_normalization not in {"none", "per_segment_zscore"}:
+        raise ValueError(
+            f"Unsupported derivative normalization: {derivative_normalization}"
+        )
+
+    signal = np.asarray(signal, dtype=np.float32)
+    channels = [signal]
+    if representation in {"ppg_vpg", "ppg_vpg_apg"}:
+        vpg = np.gradient(signal).astype(np.float32, copy=False)
+        if derivative_normalization == "per_segment_zscore":
+            vpg = _segment_zscore(vpg)
+        channels.append(vpg)
+    if representation == "ppg_vpg_apg":
+        apg = np.gradient(vpg).astype(np.float32, copy=False)
+        if derivative_normalization == "per_segment_zscore":
+            apg = _segment_zscore(apg)
+        channels.append(apg)
+    return np.stack(channels).astype(np.float32, copy=False)
