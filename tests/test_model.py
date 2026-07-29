@@ -8,6 +8,7 @@ from ppg_bp.models import (
     QumphyGatedDerivativeXResNet1D,
     QumphyIndependentHeadsXResNet1D,
     QumphyTaskAttentionXResNet1D,
+    build_model,
     qumphy_attention_multiscale_xresnet1d50,
     qumphy_concat_attention_derivative_xresnet1d50,
     qumphy_gated_derivative_task_heads_xresnet1d50,
@@ -159,3 +160,56 @@ def test_concatenated_derivative_attention_starts_as_identity() -> None:
     assert scales.shape == (2, 64)
     assert torch.allclose(scales, torch.ones_like(scales), atol=1e-6)
     assert outputs.shape == (2, 2)
+
+
+def test_physiology_guided_multitask_outputs() -> None:
+    model = build_model(
+        {
+            "name": "physiology_guided_multitask",
+            "tasks": ["heart_rate", "age_group", "bp_class"],
+            "feature_dim": 512,
+            "age_classes": 4,
+            "bp_classes": 3,
+            "backbone": {
+                "name": "qumphy_concat_attention_derivative_xresnet1d",
+                "depth": 50,
+                "input_channels": 2,
+                "outputs": 2,
+                "dropout": 0.5,
+            },
+        }
+    )
+    model.eval()
+    with torch.no_grad():
+        outputs = model(torch.randn(2, 2, 1250))
+
+    assert outputs["bp"].shape == (2, 2)
+    assert outputs["heart_rate"].shape == (2, 1)
+    assert outputs["age_group"].shape == (2, 4)
+    assert outputs["bp_class"].shape == (2, 3)
+
+
+def test_artifact_aware_model_outputs() -> None:
+    model = build_model(
+        {
+            "name": "artifact_aware_bp",
+            "artifact_classes": 13,
+            "feature_dim": 512,
+            "backbone": {
+                "name": "qumphy_concat_attention_derivative_xresnet1d",
+                "depth": 50,
+                "input_channels": 2,
+                "outputs": 2,
+                "dropout": 0.5,
+            },
+        }
+    )
+    model.eval()
+    with torch.no_grad():
+        outputs = model(torch.randn(2, 2, 1250))
+
+    assert outputs["bp"].shape == (2, 2)
+    assert outputs["artifact_type"].shape == (2, 13)
+    assert outputs["artifact_severity"].shape == (2,)
+    assert torch.all((outputs["artifact_severity"] >= 0.0))
+    assert torch.all((outputs["artifact_severity"] <= 1.0))

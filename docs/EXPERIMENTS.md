@@ -140,3 +140,72 @@ other.
 | B6-2 | `configs/pulsedb_b6_gated_task_heads.yaml` |
 | B6-3 | `configs/pulsedb_b6_independent_heads_control.yaml` |
 | B6-4 | `configs/pulsedb_b6_concat_attention_task_heads.yaml` |
+
+## M series: physiology-guided multi-task learning
+
+The M series tests whether physiological supervision can improve the shared
+PPG representation. The model input remains PPG and its numerical first
+derivative (VPG). Synchronized ECG and age metadata are used only to construct
+training labels; they are not inference inputs.
+
+- M0: BP-only control using the B6-4 backbone.
+- M1: M0 plus heart-rate regression.
+- M2: M0 plus age-group classification.
+- M3: M0 plus heart-rate and age-group tasks.
+- M4: M3 plus low/normal/high BP-pattern classification.
+
+All experiments use seed 42 and the same subject-disjoint validation and fixed
+CalFree test splits.
+
+| ID | Auxiliary tasks | Best validation MAE | CalFree SBP MAE | CalFree DBP MAE | CalFree mean MAE |
+|---|---|---:|---:|---:|---:|
+| **M0** | None | 10.579 | **12.150** | **7.886** | **10.018** |
+| M1 | Heart rate | 10.605 | 12.689 | 8.266 | 10.477 |
+| M2 | Age group | 10.603 | 13.026 | 8.016 | 10.521 |
+| M3 | Heart rate + age group | 10.580 | 12.797 | 8.213 | 10.505 |
+| M4 | Heart rate + age group + BP pattern | 10.597 | 12.299 | 8.434 | 10.366 |
+
+The auxiliary predictions were meaningful: M4 achieved 1.765 bpm heart-rate
+MAE, 58.2% age-group accuracy, and 59.2% BP-pattern accuracy on the test set.
+However, every hard-sharing variant reduced BP accuracy relative to M0. The
+current evidence therefore supports retaining M0/B6-4 and treating gradient
+conflict management, task-weight scheduling, or partially shared encoders as
+future controlled experiments.
+
+| Experiment | Configuration |
+|---|---|
+| M0 | `configs/pulsedb_m0_bp_only.yaml` |
+| M1 | `configs/pulsedb_m1_heart_rate.yaml` |
+| M2 | `configs/pulsedb_m2_age_group.yaml` |
+| M3 | `configs/pulsedb_m3_hr_age.yaml` |
+| M4 | `configs/pulsedb_m4_hr_age_bpclass.yaml` |
+
+## C series: synthetic corruption robustness
+
+The C series evaluates the M0/B6-4 PPG+VPG model under eight controlled
+corruptions at three severity levels. These transformations are synthetic;
+the simulated contact-compression condition is not equivalent to a real
+pressure-labelled dataset.
+
+| ID | Controlled change | Clean mean MAE | Robust mean MAE | Mean prediction shift | Decision |
+|---|---|---:|---:|---:|---|
+| C0 | No robustness training | **10.018** | 21.931 | 17.384 | Clean control |
+| C1 | Weak single-artifact augmentation | 10.316 | 10.729 | 3.170 | Improved robustness |
+| **C2** | **Full mixed-artifact augmentation** | 10.342 | **10.618** | **2.374** | **Selected robustness baseline** |
+| C3 | Contact and motion emphasis | 10.349 | 10.776 | 2.622 | Did not beat C2 |
+| C4 | Clean/corrupted consistency | 10.455 | 10.636 | 2.888 | Best worst-case control |
+| C5 | Artifact type and severity heads | 10.403 | 10.784 | 3.206 | Auxiliary heads did not help |
+| C6 | Transformation pretraining plus C5 | 10.513 | 10.949 | 3.236 | Pretext accuracy did not transfer |
+
+C2 reduced average corrupted MAE by 51.6% and prediction shift by 86.3%
+relative to C0, with a 0.324 mmHg clean-MAE trade-off. C4 had the lowest
+worst-condition MAE (11.748 mmHg), but C2 was better on the aggregate robust
+score and prediction stability.
+
+C6 is an STP-inspired control, not a faithful reproduction of the published
+Transformer-based STP framework. Its transformation classifier reached 99.38%
+validation accuracy, but downstream BP accuracy was worse than C2. A faithful
+STP implementation is therefore maintained as a separate reproduction track.
+
+Full aggregate results are available in
+`results/robustness_c0_c6/summary.json`.

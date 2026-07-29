@@ -1,0 +1,84 @@
+experiment:
+  id: C1
+  description: Weak single-artifact supervised augmentation
+seed: 42
+data: &data
+  root: "${PPG_BP_DATA_ROOT}/processed/pulsedb_full"
+  sampling_rate: 125
+  window_samples: 1250
+  normalization: none
+  input_representation: ppg_vpg
+  derivative_normalization: per_segment_zscore
+  split_filename: split.npy
+  label_filter: null
+model:
+  name: artifact_aware_bp
+  artifact_classes: 0
+  feature_dim: 512
+  backbone:
+    name: qumphy_concat_attention_derivative_xresnet1d
+    depth: 50
+    input_channels: 2
+    outputs: 2
+    dropout: 0.5
+training: &training
+  epochs: 50
+  batch_size: 512
+  gradient_accumulation_steps: 1
+  target_standardization: false
+  loss:
+    name: label_density_mse
+    bin_width: 5.0
+    power: 0.5
+    smoothing_sigma_bins: 1.0
+    minimum_weight: 0.25
+    maximum_weight: 4.0
+  scheduler:
+    name: constant
+  early_stopping:
+    patience: 6
+    min_delta: 0.0
+  learning_rate: 0.001
+  weight_decay: 0.001
+  num_workers: 8
+  evaluation_num_workers: 0
+  amp: true
+  device: auto
+robustness:
+  mode: supervised_augmentation
+  clean_selection_weight: 0.5
+  validation_transform: motion_artifact
+  validation_severity: 0.7
+  augmentation:
+    probability: 0.35
+    maximum_transforms: 1
+    minimum_severity: 0.15
+    maximum_severity: 0.6
+    transforms: &all_artifacts
+      - gaussian_noise
+      - powerline_noise
+      - baseline_drift
+      - motion_artifact
+      - spike_artifact
+      - random_mask
+      - clipping
+      - contact_compression
+      - sensor_gain_offset
+      - quantization
+      - lowpass_response
+      - respiratory_modulation
+  evaluation_augmentation:
+    probability: 1.0
+    maximum_transforms: 1
+    transforms: *all_artifacts
+  evaluation_suite: &suite
+    transforms:
+      - motion_artifact
+      - spike_artifact
+      - contact_compression
+      - baseline_drift
+      - gaussian_noise
+      - clipping
+      - sensor_gain_offset
+      - lowpass_response
+    severities: [0.35, 0.7, 1.0]

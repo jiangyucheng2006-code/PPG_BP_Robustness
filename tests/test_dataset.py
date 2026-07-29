@@ -3,7 +3,11 @@ import json
 import h5py
 import numpy as np
 
-from ppg_bp.data import PulseDBMemmapDataset, read_pulsedb_subject
+from ppg_bp.data import (
+    PulseDBAuxiliaryDataset,
+    PulseDBMemmapDataset,
+    read_pulsedb_subject,
+)
 
 
 def test_memmap_dataset(tmp_path) -> None:
@@ -70,3 +74,37 @@ def test_direct_single_segment_matlab_layout(tmp_path) -> None:
     assert subject.subject_id == "p000001"
     assert subject.ppg.shape == (1, 1250)
     assert subject.labels.tolist() == [[120.0, 80.0]]
+
+
+def test_auxiliary_memmap_dataset(tmp_path) -> None:
+    signals = np.stack(
+        [
+            np.linspace(0, 1, 1250, dtype=np.float32),
+            np.linspace(1, 0, 1250, dtype=np.float32),
+        ]
+    )
+    np.save(tmp_path / "ppg.npy", signals)
+    np.save(
+        tmp_path / "labels.npy",
+        np.array([[120, 80], [140, 90]], dtype=np.float32),
+    )
+    np.save(tmp_path / "split.npy", np.array([0, 2], dtype=np.uint8))
+    np.save(tmp_path / "age.npy", np.array([52, 70], dtype=np.float32))
+    np.save(tmp_path / "heart_rate.npy", np.array([72, 80], dtype=np.float32))
+    np.save(tmp_path / "heart_rate_valid.npy", np.array([1, 0], dtype=np.uint8))
+    (tmp_path / "dataset_meta.json").write_text(
+        json.dumps({"n_samples": 2, "window_samples": 1250}),
+        encoding="utf-8",
+    )
+
+    dataset = PulseDBAuxiliaryDataset(
+        tmp_path,
+        "train",
+        auxiliary_tasks=("heart_rate", "age_group", "bp_class"),
+    )
+    signal, label, auxiliary = dataset[0]
+    assert signal.shape == (1, 1250)
+    assert label.tolist() == [120.0, 80.0]
+    assert float(auxiliary["age"]) == 52.0
+    assert float(auxiliary["heart_rate"]) == 72.0
+    assert bool(auxiliary["heart_rate_valid"])

@@ -1,0 +1,55 @@
+experiment:
+  id: M2
+  description: BP regression with age-group representation learning
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/pulsedb_full"
+  sampling_rate: 125
+  window_samples: 1250
+  normalization: none
+  input_representation: ppg_vpg
+  derivative_normalization: per_segment_zscore
+  split_filename: split.npy
+  label_filter: null
+model:
+  name: physiology_guided_multitask
+  tasks: [age_group]
+  feature_dim: 512
+  age_classes: 4
+  hidden_features: 128
+  auxiliary_dropout: 0.2
+  backbone:
+    name: qumphy_concat_attention_derivative_xresnet1d
+    depth: 50
+    input_channels: 2
+    outputs: 2
+    dropout: 0.5
+training:
+  epochs: 50
+  batch_size: 512
+  gradient_accumulation_steps: 1
+  target_standardization: false
+  age_group_boundaries: [40.0, 60.0, 80.0]
+  auxiliary_loss_weights:
+    age_group: 0.1
+  loss:
+    name: label_density_mse
+    bin_width: 5.0
+    power: 0.5
+    smoothing_sigma_bins: 1.0
+    minimum_weight: 0.25
+    maximum_weight: 4.0
+  scheduler:
+    name: constant
+  early_stopping:
+    patience: 6
+    min_delta: 0.0
+  learning_rate: 0.001
+  weight_decay: 0.001
+  num_workers: 8
+  evaluation_num_workers: 0
+  amp: true
+  device: auto
+evaluation:
+  primary_metric: mean_mae
+  report_by_bp_range: true

@@ -12,7 +12,8 @@ $queues = @(
     @{ Name = "B6 gated-fusion queue"; Path = (Join-Path $outputRoot "b6_gated_queue\status.json") },
     @{ Name = "B6 heads control"; Path = (Join-Path $outputRoot "b6_heads_control_queue\status.json") },
     @{ Name = "B6 multi-seed sweep"; Path = (Join-Path $outputRoot "b6_seed_sweep_queue\status.json") },
-    @{ Name = "B6 concat-attention screen"; Path = (Join-Path $outputRoot "b6_concat_attention_queue\status.json") }
+    @{ Name = "B6 concat-attention screen"; Path = (Join-Path $outputRoot "b6_concat_attention_queue\status.json") },
+    @{ Name = "M0-M4 multi-task queue"; Path = (Join-Path $outputRoot "multitask_stp_queue\status.json") }
 )
 $runs = @(
     @{ Name = "B1"; Directory = "pulsedb_b1_huber_cosine" },
@@ -33,7 +34,12 @@ $runs = @(
     @{ Name = "B5-1 seed 2026"; Directory = "pulsedb_b5_density_moderate_seed2026" },
     @{ Name = "B6-2 attention seed 2026"; Directory = "pulsedb_b6_gated_task_heads_seed2026" },
     @{ Name = "B6-3 heads seed 2026"; Directory = "pulsedb_b6_independent_heads_control_seed2026" },
-    @{ Name = "B6-4 concat attention"; Directory = "pulsedb_b6_concat_attention_task_heads" }
+    @{ Name = "B6-4 concat attention"; Directory = "pulsedb_b6_concat_attention_task_heads" },
+    @{ Name = "M0 BP only"; Directory = "pulsedb_m0_bp_only" },
+    @{ Name = "M1 + heart rate"; Directory = "pulsedb_m1_heart_rate" },
+    @{ Name = "M2 + age group"; Directory = "pulsedb_m2_age_group" },
+    @{ Name = "M3 + HR + age"; Directory = "pulsedb_m3_hr_age" },
+    @{ Name = "M4 + HR + age + BP class"; Directory = "pulsedb_m4_hr_age_bpclass" }
 )
 
 while ($true) {

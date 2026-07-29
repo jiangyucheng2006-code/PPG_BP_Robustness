@@ -56,6 +56,20 @@ with moderate label-density weighting and separate SBP/DBP heads. The
 non-competitive concatenation-attention variant achieved a 10.018 mmHg
 single-seed mean MAE and is awaiting multi-seed confirmation.
 
+A physiology-guided multi-task ablation has also been completed. Heart rate,
+age group, and BP-pattern supervision were learned from PPG during training,
+while inference remained PPG-only. The auxiliary tasks were learnable but did
+not improve BP accuracy under direct hard sharing. Configurations and results
+are summarized in
+[`results/multitask_m0_m4`](results/multitask_m0_m4).
+
+The C0-C6 robustness ablation evaluates the same PPG-only model under 24
+controlled corruption conditions. Full mixed-artifact augmentation (C2)
+reduced average corrupted MAE from 21.931 to 10.618 mmHg and reduced the
+clean-to-corrupted prediction shift from 17.384 to 2.374 mmHg. The synthetic
+corruptions, aggregate results, and limitations are documented in
+[`results/robustness_c0_c6`](results/robustness_c0_c6).
+
 ## Installation
 
 Python 3.10 or later is required.
@@ -80,6 +94,18 @@ python scripts/prepare_pulsedb_subsets.py \
 The converter writes memory-mapped `ppg.npy`, `labels.npy`, and `split.npy`
 arrays. Raw waveforms and generated arrays are not tracked by Git.
 
+For the M-series experiments, create the compact training-only age and
+heart-rate labels after the waveform conversion:
+
+```powershell
+python scripts/prepare_pulsedb_auxiliary_labels.py `
+  --dataset-root <DATA_ROOT>/processed/pulsedb_full
+```
+
+Age comes from the official metadata. Heart rate is estimated from synchronized
+ECG and checked against PPG periodicity. Neither age nor ECG is a model input at
+inference.
+
 ## Training
 
 Set the data root and run the official-compatible XResNet-50 configuration:
@@ -100,6 +126,22 @@ Training writes the following local artifacts:
 | `last.pt` | Latest resumable training state |
 | `history.json` | Per-epoch training and validation metrics |
 | `metrics.json` | Final evaluation on the fixed test set |
+
+Run one M-series configuration with:
+
+```powershell
+python scripts/train_multitask.py `
+  --config configs/pulsedb_m4_hr_age_bpclass.yaml `
+  --output outputs/pulsedb_m4_hr_age_bpclass `
+  --resume
+```
+
+Run the complete C-series robustness suite with:
+
+```powershell
+python scripts/run_c_suite.py `
+  --status outputs/c_robustness_suite/status.json
+```
 
 The smoke configuration is limited to pipeline verification:
 
