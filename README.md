@@ -63,6 +63,13 @@ not improve BP accuracy under direct hard sharing. Configurations and results
 are summarized in
 [`results/multitask_m0_m4`](results/multitask_m0_m4).
 
+The C0-C6 robustness ablation evaluates the same PPG-only model under 24
+controlled corruption conditions. Full mixed-artifact augmentation (C2)
+reduced average corrupted MAE from 21.931 to 10.618 mmHg and reduced the
+clean-to-corrupted prediction shift from 17.384 to 2.374 mmHg. The synthetic
+corruptions, aggregate results, and limitations are documented in
+[`results/robustness_c0_c6`](results/robustness_c0_c6).
+
 ## Installation
 
 Python 3.10 or later is required.
@@ -127,6 +134,13 @@ python scripts/train_multitask.py `
   --config configs/pulsedb_m4_hr_age_bpclass.yaml `
   --output outputs/pulsedb_m4_hr_age_bpclass `
   --resume
+```
+
+Run the complete C-series robustness suite with:
+
+```powershell
+python scripts/run_c_suite.py `
+  --status outputs/c_robustness_suite/status.json
 ```
 
 The smoke configuration is limited to pipeline verification:

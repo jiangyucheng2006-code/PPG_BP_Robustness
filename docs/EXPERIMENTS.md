@@ -179,3 +179,33 @@ future controlled experiments.
 | M2 | `configs/pulsedb_m2_age_group.yaml` |
 | M3 | `configs/pulsedb_m3_hr_age.yaml` |
 | M4 | `configs/pulsedb_m4_hr_age_bpclass.yaml` |
+
+## C series: synthetic corruption robustness
+
+The C series evaluates the M0/B6-4 PPG+VPG model under eight controlled
+corruptions at three severity levels. These transformations are synthetic;
+the simulated contact-compression condition is not equivalent to a real
+pressure-labelled dataset.
+
+| ID | Controlled change | Clean mean MAE | Robust mean MAE | Mean prediction shift | Decision |
+|---|---|---:|---:|---:|---|
+| C0 | No robustness training | **10.018** | 21.931 | 17.384 | Clean control |
+| C1 | Weak single-artifact augmentation | 10.316 | 10.729 | 3.170 | Improved robustness |
+| **C2** | **Full mixed-artifact augmentation** | 10.342 | **10.618** | **2.374** | **Selected robustness baseline** |
+| C3 | Contact and motion emphasis | 10.349 | 10.776 | 2.622 | Did not beat C2 |
+| C4 | Clean/corrupted consistency | 10.455 | 10.636 | 2.888 | Best worst-case control |
+| C5 | Artifact type and severity heads | 10.403 | 10.784 | 3.206 | Auxiliary heads did not help |
+| C6 | Transformation pretraining plus C5 | 10.513 | 10.949 | 3.236 | Pretext accuracy did not transfer |
+
+C2 reduced average corrupted MAE by 51.6% and prediction shift by 86.3%
+relative to C0, with a 0.324 mmHg clean-MAE trade-off. C4 had the lowest
+worst-condition MAE (11.748 mmHg), but C2 was better on the aggregate robust
+score and prediction stability.
+
+C6 is an STP-inspired control, not a faithful reproduction of the published
+Transformer-based STP framework. Its transformation classifier reached 99.38%
+validation accuracy, but downstream BP accuracy was worse than C2. A faithful
+STP implementation is therefore maintained as a separate reproduction track.
+
+Full aggregate results are available in
+`results/robustness_c0_c6/summary.json`.

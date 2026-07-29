@@ -21,6 +21,7 @@ from .qumphy_xresnet1d import (
 )
 from .xresnet1d import XResNet1D, xresnet1d50, xresnet1d101
 from .multitask import PhysiologyGuidedMultiTaskModel
+from .robustness import ArtifactAwareBPModel
 
 
 def build_model(model_config: dict):
@@ -37,6 +38,15 @@ def build_model(model_config: dict):
             bp_classes=int(model_config.get("bp_classes", 3)),
             hidden_features=int(model_config.get("hidden_features", 128)),
             auxiliary_dropout=float(model_config.get("auxiliary_dropout", 0.2)),
+        )
+    if model_name == "artifact_aware_bp":
+        backbone = build_model(model_config["backbone"])
+        return ArtifactAwareBPModel(
+            backbone,
+            feature_dim=int(model_config.get("feature_dim", 512)),
+            artifact_classes=int(model_config.get("artifact_classes", 0)),
+            hidden_features=int(model_config.get("hidden_features", 128)),
+            dropout=float(model_config.get("artifact_dropout", 0.2)),
         )
 
     factories = {
@@ -102,6 +112,7 @@ __all__ = [
     "qumphy_xresnet1d101",
     "XResNet1D",
     "PhysiologyGuidedMultiTaskModel",
+    "ArtifactAwareBPModel",
     "xresnet1d50",
     "xresnet1d101",
     "build_model",

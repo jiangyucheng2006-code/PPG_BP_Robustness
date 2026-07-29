@@ -1,0 +1,104 @@
+{
+  "dataset": "PulseDB v2.0 VitalDB supplementary subsets",
+  "protocol": "subject-disjoint validation; fixed calibration-free test",
+  "seed": 42,
+  "input_at_inference": "PPG and PPG-derived VPG only",
+  "robustness_suite": {
+    "transforms": [
+      "motion_artifact",
+      "spike_artifact",
+      "contact_compression",
+      "baseline_drift",
+      "gaussian_noise",
+      "clipping",
+      "sensor_gain_offset",
+      "lowpass_response"
+    ],
+    "severities": [0.35, 0.7, 1.0],
+    "note": "All corruptions, including contact compression, are synthetic."
+  },
+  "experiments": {
+    "C0": {
+      "strategy": "unmodified M0/B6-4 checkpoint",
+      "clean_sbp_mae": 12.149714,
+      "clean_dbp_mae": 7.886348,
+      "clean_mean_mae": 10.018031,
+      "robust_mean_mae": 21.931,
+      "mean_prediction_shift_mae": 17.384,
+      "worst_condition_mae": 67.376
+    },
+    "C1": {
+      "strategy": "weak single-artifact augmentation",
+      "best_epoch": 3,
+      "completed_epochs": 9,
+      "clean_sbp_mae": 12.568,
+      "clean_dbp_mae": 8.063,
+      "clean_mean_mae": 10.316,
+      "robust_mean_mae": 10.729,
+      "mean_prediction_shift_mae": 3.170,
+      "worst_condition_mae": 12.234
+    },
+    "C2": {
+      "strategy": "full mixed-artifact augmentation",
+      "best_epoch": 2,
+      "completed_epochs": 8,
+      "clean_sbp_mae": 12.468,
+      "clean_dbp_mae": 8.216,
+      "clean_mean_mae": 10.342,
+      "robust_mean_mae": 10.618,
+      "mean_prediction_shift_mae": 2.374,
+      "worst_condition_mae": 12.025,
+      "strong_condition_mean_mae": {
+        "motion_artifact": 12.025,
+        "gaussian_noise": 11.101,
+        "contact_compression": 10.661
+      }
+    },
+    "C3": {
+      "strategy": "contact-compression and motion emphasis",
+      "best_epoch": 3,
+      "completed_epochs": 9,
+      "clean_sbp_mae": 12.521,
+      "clean_dbp_mae": 8.177,
+      "clean_mean_mae": 10.349,
+      "robust_mean_mae": 10.776,
+      "mean_prediction_shift_mae": 2.622,
+      "worst_condition_mae": 12.991
+    },
+    "C4": {
+      "strategy": "clean/corrupted prediction consistency",
+      "best_epoch": 5,
+      "completed_epochs": 11,
+      "clean_sbp_mae": 12.728,
+      "clean_dbp_mae": 8.183,
+      "clean_mean_mae": 10.455,
+      "robust_mean_mae": 10.636,
+      "mean_prediction_shift_mae": 2.888,
+      "worst_condition_mae": 11.748
+    },
+    "C5": {
+      "strategy": "artifact-type and severity auxiliary heads",
+      "best_epoch": 1,
+      "completed_epochs": 7,
+      "clean_sbp_mae": 12.802,
+      "clean_dbp_mae": 8.004,
+      "clean_mean_mae": 10.403,
+      "robust_mean_mae": 10.784,
+      "mean_prediction_shift_mae": 3.206,
+      "worst_condition_mae": 11.952
+    },
+    "C6": {
+      "strategy": "transformation pretraining and artifact-aware fine-tuning",
+      "best_epoch": 1,
+      "completed_epochs": 7,
+      "pretraining_best_transform_accuracy": 0.993817,
+      "clean_sbp_mae": 13.016,
+      "clean_dbp_mae": 8.010,
+      "clean_mean_mae": 10.513,
+      "robust_mean_mae": 10.949,
+      "mean_prediction_shift_mae": 3.236,
+      "worst_condition_mae": 12.346
+    }
+  },
+  "decision": "Retain C2 as the robustness baseline and C4 as the consistency-learning control."
+}

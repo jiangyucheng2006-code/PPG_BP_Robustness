@@ -187,3 +187,29 @@ def test_physiology_guided_multitask_outputs() -> None:
     assert outputs["heart_rate"].shape == (2, 1)
     assert outputs["age_group"].shape == (2, 4)
     assert outputs["bp_class"].shape == (2, 3)
+
+
+def test_artifact_aware_model_outputs() -> None:
+    model = build_model(
+        {
+            "name": "artifact_aware_bp",
+            "artifact_classes": 13,
+            "feature_dim": 512,
+            "backbone": {
+                "name": "qumphy_concat_attention_derivative_xresnet1d",
+                "depth": 50,
+                "input_channels": 2,
+                "outputs": 2,
+                "dropout": 0.5,
+            },
+        }
+    )
+    model.eval()
+    with torch.no_grad():
+        outputs = model(torch.randn(2, 2, 1250))
+
+    assert outputs["bp"].shape == (2, 2)
+    assert outputs["artifact_type"].shape == (2, 13)
+    assert outputs["artifact_severity"].shape == (2,)
+    assert torch.all((outputs["artifact_severity"] >= 0.0))
+    assert torch.all((outputs["artifact_severity"] <= 1.0))
