@@ -14,12 +14,12 @@ import hashlib
 import json
 import pickle
 import re
-import shutil
-import urllib.request
+import time
 import zipfile
 from pathlib import Path
 
 import numpy as np
+import requests
 import wfdb
 from scipy.signal import correlate, correlation_lags, find_peaks
 from tqdm import tqdm
@@ -35,25 +35,72 @@ MIMIC_PAIRED_INDEX_URL = (
 )
 
 
-def progress_download(url: str, destination: Path) -> None:
+def progress_download(
+    url: str,
+    destination: Path,
+    *,
+    retries: int = 12,
+) -> None:
+    """Download a large public file with retry and HTTP range resumption."""
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         return
     temporary = destination.with_suffix(destination.suffix + ".part")
-
-    def report(blocks: int, block_size: int, total: int) -> None:
-        downloaded = blocks * block_size
-        percent = 100 * downloaded / total if total > 0 else 0
-        print(
-            f"\rDownloading {destination.name}: "
-            f"{downloaded / 2**30:.2f} / {total / 2**30:.2f} GB "
-            f"({percent:.1f}%)",
-            end="",
-        )
-
-    urllib.request.urlretrieve(url, temporary, reporthook=report)
-    print()
-    temporary.replace(destination)
+    for attempt in range(1, retries + 1):
+        offset = temporary.stat().st_size if temporary.exists() else 0
+        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        try:
+            with requests.get(
+                url,
+                headers=headers,
+                stream=True,
+                timeout=(30, 90),
+            ) as response:
+                response.raise_for_status()
+                resumed = offset > 0 and response.status_code == 206
+                if offset and not resumed:
+                    offset = 0
+                content_range = response.headers.get("Content-Range", "")
+                total = None
+                if "/" in content_range:
+                    value = content_range.rsplit("/", 1)[-1]
+                    if value.isdigit():
+                        total = int(value)
+                if total is None:
+                    remaining = response.headers.get("Content-Length")
+                    if remaining and remaining.isdigit():
+                        total = offset + int(remaining)
+                mode = "ab" if resumed else "wb"
+                with temporary.open(mode) as stream, tqdm(
+                    total=total,
+                    initial=offset,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc=f"Downloading {destination.name}",
+                ) as progress:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        stream.write(chunk)
+                        progress.update(len(chunk))
+            if total is not None and temporary.stat().st_size < total:
+                raise IOError(
+                    f"incomplete file: {temporary.stat().st_size}/{total} bytes"
+                )
+            temporary.replace(destination)
+            return
+        except (OSError, requests.RequestException) as error:
+            if attempt >= retries:
+                raise
+            delay = min(60, 5 * attempt)
+            print(
+                f"Download interrupted ({error}); retaining "
+                f"{temporary.stat().st_size / 2**30:.2f} GB and retrying "
+                f"in {delay} s ({attempt}/{retries})."
+            )
+            time.sleep(delay)
 
 
 def extract_archive(archive: Path, destination: Path) -> None:
