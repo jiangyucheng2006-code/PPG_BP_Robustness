@@ -70,6 +70,15 @@ clean-to-corrupted prediction shift from 17.384 to 2.374 mmHg. The synthetic
 corruptions, aggregate results, and limitations are documented in
 [`results/robustness_c0_c6`](results/robustness_c0_c6).
 
+A separate S1-S3 track now reproduces the published STP architecture as
+closely as the public information allows: transformed-signal reconstruction
+with a Transformer encoder-decoder, three-class BP-pattern adaptation, and
+SBP/DBP regression with sequential encoder transfer. It uses WESAD and
+PPG-DaLiA for unpaired pretraining and MIMIC-III PPG/ABP for the two downstream
+stages. The private Mindray cohort is omitted. Confirmed details, provisional
+hyperparameters, data preparation, and run commands are documented in
+[`docs/STP_REPRODUCTION.md`](docs/STP_REPRODUCTION.md).
+
 ## Installation
 
 Python 3.10 or later is required.
@@ -142,6 +151,18 @@ Run the complete C-series robustness suite with:
 python scripts/run_c_suite.py `
   --status outputs/c_robustness_suite/status.json
 ```
+
+Run the faithful public-data STP reproduction sequentially with:
+
+```powershell
+python scripts/train_stp.py `
+  --config configs/stp_s1_public_pretrain.yaml `
+  --output outputs/stp_s1_public_pretrain `
+  --resume
+```
+
+Continue with S2 and S3 using the commands in
+[`docs/STP_REPRODUCTION.md`](docs/STP_REPRODUCTION.md).
 
 The smoke configuration is limited to pipeline verification:
 

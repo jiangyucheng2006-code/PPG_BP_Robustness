@@ -1,0 +1,51 @@
+experiment:
+  id: S1
+  description: STP transformed-PPG reconstruction pretraining
+  fidelity: paper-confirmed architecture; unreported hyperparameters are provisional
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/stp_public"
+  sources: [WESAD, PPGDaLiA]
+  sampling_rate: 125
+  window_cycles: 5
+  stride_cycles: 2
+model:
+  name: stp
+  stage: pretrain
+  input_channels: 1
+  signal_length: 512
+  patch_size: 8
+  embedding_dim: 128
+  encoder_layers: 4
+  decoder_layers: 2
+  attention_heads: 8
+  feedforward_dim: 256
+  dropout: 0.1
+training:
+  epochs: 50
+  batch_size: 256
+  learning_rate: 0.0001
+  minimum_learning_rate: 0.000001
+  weight_decay: 0.0001
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 8
+  num_workers: 8
+  amp: true
+  device: auto
+pretraining:
+  transforms:
+    minimum_severity: 0.25
+    maximum_severity: 1.0
+    include_identity: false
+    transforms:
+      - gaussian_noise
+      - powerline_noise
+      - motion_artifacts
+      - baseline_drift
+      - rsa
+      - random_mask
+      - hard_clipping
+      - amplitude_negation
+      - temporal_inversion
+      - temporal_permutation
+      - temporal_warping
