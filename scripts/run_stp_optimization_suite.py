@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import copy
+import ctypes
 import json
 import os
 import subprocess
@@ -19,6 +21,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "stp_optimization_suite.yaml"
 DEFAULT_OUTPUT = PROJECT_ROOT / "outputs" / "stp_optimization_suite"
 S1_CHECKPOINT = PROJECT_ROOT / "outputs" / "stp_s1_public_pretrain" / "best.pt"
+
+
+def prevent_idle_sleep() -> None:
+    """Keep Windows awake while the queue process is alive."""
+
+    if os.name != "nt":
+        return
+    execution_state_continuous = 0x80000000
+    execution_state_system_required = 0x00000001
+    kernel = ctypes.windll.kernel32
+    kernel.SetThreadExecutionState(
+        execution_state_continuous | execution_state_system_required
+    )
+    atexit.register(
+        kernel.SetThreadExecutionState,
+        execution_state_continuous,
+    )
 
 
 def utc_now() -> str:
@@ -207,6 +226,7 @@ def main() -> None:
     parser.add_argument("--status", type=Path)
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
+    prevent_idle_sleep()
 
     suite = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     output_root = args.output.resolve()
