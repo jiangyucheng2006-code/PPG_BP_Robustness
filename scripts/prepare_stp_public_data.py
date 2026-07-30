@@ -105,11 +105,22 @@ def progress_download(
 
 def extract_archive(archive: Path, destination: Path) -> None:
     marker = destination / ".complete"
-    if marker.exists():
+    nested_archives = list(destination.glob("*.zip")) if destination.exists() else []
+    if marker.exists() and not nested_archives:
         return
     destination.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive) as stream:
-        stream.extractall(destination)
+    if not marker.exists():
+        with zipfile.ZipFile(archive) as stream:
+            stream.extractall(destination)
+    # UCI's PPG-DaLiA download is a ZIP containing another data.zip. Extract
+    # such top-level archives as well so the subject pickle files are visible.
+    for nested_archive in destination.glob("*.zip"):
+        nested_marker = destination / f".{nested_archive.stem}.complete"
+        if nested_marker.exists():
+            continue
+        with zipfile.ZipFile(nested_archive) as stream:
+            stream.extractall(destination)
+        nested_marker.touch()
     marker.touch()
 
 

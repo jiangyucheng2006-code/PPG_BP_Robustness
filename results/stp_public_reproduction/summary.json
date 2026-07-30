@@ -1,0 +1,55 @@
+{
+  "experiment": "STP public-data reproduction",
+  "data": {
+    "WESAD": {
+      "subjects": 15,
+      "windows": 44249
+    },
+    "PPGDaLiA": {
+      "subjects": 15,
+      "windows": 76464
+    },
+    "MIMICIII": {
+      "attempted_record_groups": 500,
+      "valid_record_groups": 403,
+      "windows": 454367
+    }
+  },
+  "stages": {
+    "S1": {
+      "best_epoch": 42,
+      "completed_epochs": 50,
+      "test_reconstruction_mse": 0.01352355948253236,
+      "test_reconstruction_mae": 0.07238850061399801
+    },
+    "S2": {
+      "best_epoch": 5,
+      "completed_epochs": 11,
+      "test_pattern_accuracy": 0.3663419549882432,
+      "test_pattern_macro_recall": 0.35189712047576904
+    },
+    "S3": {
+      "best_epoch": 8,
+      "completed_epochs": 16,
+      "test_sbp_mae": 23.13095918116571,
+      "test_sbp_rmse": 30.411182741869048,
+      "test_sbp_bias": 4.45720961130262,
+      "test_sbp_error_std": 30.082976547171178,
+      "test_dbp_mae": 12.648025283300921,
+      "test_dbp_rmse": 17.144091199538522,
+      "test_dbp_bias": 0.8645831778836722,
+      "test_dbp_error_std": 17.122391719750933,
+      "test_mean_mae": 17.889492232233316,
+      "sbp_bhs_grade": "D",
+      "dbp_bhs_grade": "D",
+      "sbp_aami_numerical_pass": false,
+      "dbp_aami_numerical_pass": false
+    }
+  },
+  "reproduction_scope": {
+    "public_only": true,
+    "private_mindray_included": false,
+    "exact_paper_hyperparameters_available": false,
+    "claim_exact_numerical_reproduction": false
+  }
+}

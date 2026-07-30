@@ -164,3 +164,13 @@ python scripts/train_stp.py `
 Each output directory contains `best.pt`, `last.pt`, `history.json`, and
 `metrics.json`. Checkpoints also store the encoder separately so the transfer
 between S1, S2, and S3 is auditable.
+
+## Completed public-data run
+
+The first complete held-out run is recorded in
+[`results/stp_public_reproduction`](../results/stp_public_reproduction/README.md).
+It used 15 WESAD subjects, 15 PPG-DaLiA subjects, and 403 valid MIMIC-III
+record groups. The complete pipeline ran successfully, but the public-only
+result did not meet AAMI or BHS accuracy targets. This result is retained as
+the optimization baseline rather than presented as an exact numerical
+reproduction of the private-data study.
