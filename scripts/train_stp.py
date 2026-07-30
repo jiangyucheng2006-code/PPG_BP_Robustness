@@ -13,7 +13,7 @@ import torch
 import yaml
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 from ppg_bp.data import STPWindowDataset, build_stp_transform_bank
@@ -59,19 +59,82 @@ def build_loaders(config: dict, stage: str, device: torch.device):
         for split in ("train", "val", "test")
     }
     workers = int(config["training"].get("num_workers", 0))
-    loaders = {
-        split: DataLoader(
+    loaders = {}
+    for split, dataset in datasets.items():
+        sampler = None
+        if (
+            split == "train"
+            and bool(config["training"].get("subject_balanced_sampling", False))
+        ):
+            subject_indices = np.fromiter(
+                (subject_index for subject_index, _ in dataset.index),
+                dtype=np.int64,
+                count=len(dataset.index),
+            )
+            counts = np.bincount(
+                subject_indices,
+                minlength=len(dataset.subjects),
+            ).clip(min=1)
+            sample_weights = 1.0 / counts[subject_indices]
+            generator = torch.Generator()
+            generator.manual_seed(int(config.get("seed", 42)))
+            sampler = WeightedRandomSampler(
+                torch.from_numpy(sample_weights).double(),
+                num_samples=len(dataset),
+                replacement=True,
+                generator=generator,
+            )
+        loaders[split] = DataLoader(
             dataset,
             batch_size=int(config["training"]["batch_size"]),
-            shuffle=split == "train",
+            shuffle=split == "train" and sampler is None,
+            sampler=sampler,
             drop_last=split == "train",
             num_workers=workers if split == "train" else 0,
             persistent_workers=split == "train" and workers > 0,
             pin_memory=device.type == "cuda",
         )
-        for split, dataset in datasets.items()
-    }
     return datasets, loaders
+
+
+def pattern_loss_weights(
+    dataset: STPWindowDataset,
+    mode: str,
+    device: torch.device,
+) -> torch.Tensor | None:
+    mode = str(mode).lower()
+    if mode in {"", "none"}:
+        return None
+    counts = np.bincount(
+        dataset.target_values("patterns").astype(np.int64),
+        minlength=3,
+    ).clip(min=1)
+    inverse = counts.sum() / (len(counts) * counts)
+    if mode == "sqrt_inverse":
+        inverse = np.sqrt(inverse)
+    elif mode != "balanced":
+        raise ValueError(
+            "class_weighting must be none, balanced, or sqrt_inverse"
+        )
+    inverse = inverse / inverse.mean()
+    return torch.as_tensor(inverse, dtype=torch.float32, device=device)
+
+
+def regression_loss(
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    mode: str,
+    huber_delta: float,
+) -> torch.Tensor:
+    mode = str(mode).lower()
+    if mode == "mse":
+        return F.mse_loss(prediction, target)
+    if mode in {"huber", "smooth_l1"}:
+        return F.huber_loss(prediction, target, delta=huber_delta)
+    if mode in {"mae", "l1"}:
+        return F.l1_loss(prediction, target)
+    raise ValueError(f"Unsupported BP regression loss: {mode}")
 
 
 @torch.no_grad()
@@ -197,26 +260,45 @@ def main() -> None:
     target_mean = torch.zeros(2, device=device)
     target_std = torch.ones(2, device=device)
     if stage == "bp":
-        train_labels = np.concatenate(
-            [
-                np.asarray(
-                    np.load(
-                        datasets["train"].root / entry["labels"],
-                        mmap_mode="r",
-                    ),
-                    dtype=np.float32,
-                )
-                for entry in datasets["train"].subjects
-            ]
+        train_labels = np.asarray(
+            datasets["train"].target_values("labels"),
+            dtype=np.float32,
         )
         target_mean = torch.from_numpy(train_labels.mean(axis=0)).to(device)
         target_std = torch.from_numpy(
             train_labels.std(axis=0).clip(min=1.0)
         ).to(device)
+    pulse_pressure_std = torch.tensor(1.0, device=device)
+    if stage == "bp":
+        pulse_pressure_std = torch.tensor(
+            max(float(np.std(train_labels[:, 0] - train_labels[:, 1])), 1.0),
+            device=device,
+        )
 
+    learning_rate = float(config["training"]["learning_rate"])
+    encoder_lr_scale = float(
+        config["training"].get("encoder_learning_rate_scale", 1.0)
+    )
+    if stage != "pretrain" and encoder_lr_scale != 1.0:
+        encoder_parameters = list(model.encoder.parameters())
+        encoder_ids = {id(parameter) for parameter in encoder_parameters}
+        head_parameters = [
+            parameter
+            for parameter in model.parameters()
+            if id(parameter) not in encoder_ids
+        ]
+        parameter_groups = [
+            {
+                "params": encoder_parameters,
+                "lr": learning_rate * encoder_lr_scale,
+            },
+            {"params": head_parameters, "lr": learning_rate},
+        ]
+    else:
+        parameter_groups = model.parameters()
     optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=float(config["training"]["learning_rate"]),
+        parameter_groups,
+        lr=learning_rate,
         weight_decay=float(config["training"].get("weight_decay", 0)),
     )
     epochs = int(config["training"]["epochs"])
@@ -228,6 +310,21 @@ def main() -> None:
     use_amp = bool(config["training"].get("amp", True)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     patience = int(config["training"].get("early_stopping_patience", 10))
+    minimum_improvement = float(
+        config["training"].get("minimum_improvement", 0.0)
+    )
+    freeze_encoder_epochs = int(
+        config["training"].get("freeze_encoder_epochs", 0)
+    )
+    class_weights = (
+        pattern_loss_weights(
+            datasets["train"],
+            str(config["training"].get("class_weighting", "none")),
+            device,
+        )
+        if stage == "pattern"
+        else None
+    )
     args.output.mkdir(parents=True, exist_ok=True)
     best_score = float("inf")
     epochs_without_improvement = 0
@@ -247,7 +344,13 @@ def main() -> None:
         print(f"Resuming from epoch {start_epoch}")
 
     for epoch in range(start_epoch, epochs + 1):
+        if stage != "pretrain":
+            encoder_trainable = epoch > freeze_encoder_epochs
+            for parameter in model.encoder.parameters():
+                parameter.requires_grad_(encoder_trainable)
         model.train()
+        if stage != "pretrain" and not encoder_trainable:
+            model.encoder.eval()
         running_loss = 0.0
         samples = 0
         for batch in tqdm(
@@ -275,6 +378,7 @@ def main() -> None:
                     loss = F.cross_entropy(
                         prediction,
                         labels,
+                        weight=class_weights,
                         label_smoothing=float(
                             config["training"].get("label_smoothing", 0)
                         ),
@@ -287,7 +391,36 @@ def main() -> None:
                 normalized_labels = (labels - target_mean) / target_std
                 with torch.autocast(device_type=device.type, enabled=use_amp):
                     prediction = model(signals)
-                    loss = F.mse_loss(prediction, normalized_labels)
+                    loss = regression_loss(
+                        prediction,
+                        normalized_labels,
+                        mode=str(config["training"].get("loss", "mse")),
+                        huber_delta=float(
+                            config["training"].get("huber_delta", 1.0)
+                        ),
+                    )
+                    pulse_pressure_weight = float(
+                        config["training"].get(
+                            "pulse_pressure_loss_weight",
+                            0.0,
+                        )
+                    )
+                    if pulse_pressure_weight > 0:
+                        physical_prediction = (
+                            prediction * target_std + target_mean
+                        )
+                        predicted_pulse_pressure = (
+                            physical_prediction[:, 0]
+                            - physical_prediction[:, 1]
+                        )
+                        target_pulse_pressure = labels[:, 0] - labels[:, 1]
+                        loss = loss + pulse_pressure_weight * F.huber_loss(
+                            predicted_pulse_pressure / pulse_pressure_std,
+                            target_pulse_pressure / pulse_pressure_std,
+                            delta=float(
+                                config["training"].get("huber_delta", 1.0)
+                            ),
+                        )
                 batch_samples = len(signals)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -326,7 +459,7 @@ def main() -> None:
         history.append(row)
         print(json.dumps(row))
         score = validation_score(stage, validation)
-        if score < best_score:
+        if score < best_score - minimum_improvement:
             best_score = score
             epochs_without_improvement = 0
             torch.save(

@@ -98,6 +98,53 @@ class STPEncoder(nn.Module):
         return tokens.mean(dim=1)
 
 
+class STPTokenPool(nn.Module):
+    """Aggregate Transformer tokens without discarding beat variability."""
+
+    def __init__(self, features: int, mode: str = "mean") -> None:
+        super().__init__()
+        self.mode = str(mode).lower()
+        supported = {
+            "mean",
+            "statistics",
+            "attention",
+            "attentive_statistics",
+        }
+        if self.mode not in supported:
+            raise ValueError(
+                f"Unsupported STP pooling mode {mode!r}; expected {sorted(supported)}"
+            )
+        if self.mode in {"attention", "attentive_statistics"}:
+            self.attention = nn.Sequential(
+                nn.LayerNorm(features),
+                nn.Linear(features, 1),
+            )
+        else:
+            self.attention = None
+        self.output_features = (
+            features
+            if self.mode in {"mean", "attention"}
+            else 2 * features
+        )
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        if self.attention is None:
+            mean = tokens.mean(dim=1)
+            if self.mode == "mean":
+                return mean
+            variance = (tokens - mean[:, None]).square().mean(dim=1)
+        else:
+            weights = self.attention(tokens).squeeze(-1).softmax(dim=1)
+            mean = (tokens * weights[..., None]).sum(dim=1)
+            if self.mode == "attention":
+                return mean
+            variance = (
+                (tokens - mean[:, None]).square() * weights[..., None]
+            ).sum(dim=1)
+        standard_deviation = variance.clamp_min(1e-6).sqrt()
+        return torch.cat((mean, standard_deviation), dim=1)
+
+
 class STPSelfSupervisedModel(nn.Module):
     """Transformer encoder-decoder that reconstructs clean PPG."""
 
@@ -164,12 +211,14 @@ class STPPatternAdapter(nn.Module):
         classes: int = 3,
         hidden_features: int = 128,
         dropout: float = 0.2,
+        pooling: str = "mean",
     ) -> None:
         super().__init__()
         self.encoder = encoder
+        self.pool = STPTokenPool(encoder.embedding_dim, pooling)
         self.pattern_discriminator = nn.Sequential(
-            nn.LayerNorm(encoder.embedding_dim),
-            nn.Linear(encoder.embedding_dim, hidden_features),
+            nn.LayerNorm(self.pool.output_features),
+            nn.Linear(self.pool.output_features, hidden_features),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_features, classes),
@@ -182,7 +231,7 @@ class STPPatternAdapter(nn.Module):
         return_features: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         tokens = self.encoder(signal)
-        features = self.encoder.pool(tokens)
+        features = self.pool(tokens)
         logits = self.pattern_discriminator(features)
         if return_features:
             return logits, features
@@ -199,12 +248,14 @@ class STPBPRegressor(nn.Module):
         outputs: int = 2,
         hidden_features: int = 128,
         dropout: float = 0.2,
+        pooling: str = "mean",
     ) -> None:
         super().__init__()
         self.encoder = encoder
+        self.pool = STPTokenPool(encoder.embedding_dim, pooling)
         self.bp_value_regressor = nn.Sequential(
-            nn.LayerNorm(encoder.embedding_dim),
-            nn.Linear(encoder.embedding_dim, hidden_features),
+            nn.LayerNorm(self.pool.output_features),
+            nn.Linear(self.pool.output_features, hidden_features),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_features, outputs),
@@ -217,7 +268,7 @@ class STPBPRegressor(nn.Module):
         return_features: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         tokens = self.encoder(signal)
-        features = self.encoder.pool(tokens)
+        features = self.pool(tokens)
         values = self.bp_value_regressor(features)
         if return_features:
             return values, features
@@ -256,6 +307,7 @@ def build_stp_model(config: Mapping[str, object]) -> nn.Module:
             classes=int(config.get("pattern_classes", 3)),
             hidden_features=int(config.get("head_features", 128)),
             dropout=float(config.get("head_dropout", 0.2)),
+            pooling=str(config.get("pooling", "mean")),
         )
     if stage == "bp":
         return STPBPRegressor(
@@ -263,6 +315,7 @@ def build_stp_model(config: Mapping[str, object]) -> nn.Module:
             outputs=int(config.get("outputs", 2)),
             hidden_features=int(config.get("head_features", 128)),
             dropout=float(config.get("head_dropout", 0.2)),
+            pooling=str(config.get("pooling", "mean")),
         )
     raise ValueError(f"Unsupported STP stage: {stage}")
 

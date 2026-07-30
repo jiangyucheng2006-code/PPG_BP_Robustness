@@ -164,6 +164,15 @@ python scripts/train_stp.py `
 Continue with S2 and S3 using the commands in
 [`docs/STP_REPRODUCTION.md`](docs/STP_REPRODUCTION.md).
 
+Run the repeated STP downstream optimization matrix with:
+
+```powershell
+python scripts/run_stp_optimization_suite.py
+```
+
+The 63-stage, multi-seed comparison is described in
+[`docs/STP_OPTIMIZATION.md`](docs/STP_OPTIMIZATION.md).
+
 The smoke configuration is limited to pipeline verification:
 
 ```powershell

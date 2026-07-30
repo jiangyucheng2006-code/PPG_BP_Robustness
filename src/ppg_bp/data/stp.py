@@ -184,6 +184,18 @@ class STPWindowDataset(Dataset):
             )
         return cache[subject_index]
 
+    def target_values(self, key: Literal["labels", "patterns"]) -> np.ndarray:
+        """Return targets for exactly the samples selected by this dataset."""
+
+        rows_by_subject: dict[int, list[int]] = {}
+        for subject_index, row in self.index:
+            rows_by_subject.setdefault(subject_index, []).append(row)
+        values = [
+            np.asarray(self._array(subject_index, key))[rows]
+            for subject_index, rows in rows_by_subject.items()
+        ]
+        return np.concatenate(values)
+
     def __getitem__(self, item: int):
         subject_index, row = self.index[item]
         signal = np.asarray(

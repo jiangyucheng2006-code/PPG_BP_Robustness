@@ -1,0 +1,111 @@
+experiment:
+  id: STP-O
+  description: Repeated public-data STP downstream optimization
+  estimated_runtime_hours: "9-14"
+
+seeds: [42, 17, 73]
+transfer_paths: [direct_s1, via_s2]
+
+common_training:
+  epochs: 120
+  batch_size: 256
+  learning_rate: 0.0001
+  minimum_learning_rate: 0.000001
+  weight_decay: 0.0001
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 25
+  num_workers: 8
+  amp: true
+  device: auto
+
+variants:
+  - id: O0_control
+    description: Published-path control with mean pooling and MSE
+    model:
+      pooling: mean
+    training:
+      loss: mse
+      class_weighting: none
+      subject_balanced_sampling: false
+      encoder_learning_rate_scale: 1.0
+      freeze_encoder_epochs: 0
+      pulse_pressure_loss_weight: 0.0
+
+  - id: O1_robust_objectives
+    description: Huber BP loss and class-aware S2 loss
+    model:
+      pooling: mean
+    training:
+      loss: huber
+      huber_delta: 1.0
+      class_weighting: sqrt_inverse
+      subject_balanced_sampling: false
+      encoder_learning_rate_scale: 1.0
+      freeze_encoder_epochs: 0
+      pulse_pressure_loss_weight: 0.0
+
+  - id: O2_subject_balance
+    description: Give each training subject equal expected sampling weight
+    model:
+      pooling: mean
+    training:
+      loss: huber
+      huber_delta: 1.0
+      class_weighting: sqrt_inverse
+      subject_balanced_sampling: true
+      encoder_learning_rate_scale: 1.0
+      freeze_encoder_epochs: 0
+      pulse_pressure_loss_weight: 0.0
+
+  - id: O3_encoder_protection
+    description: Head warm-up and slower encoder fine-tuning
+    model:
+      pooling: mean
+    training:
+      loss: huber
+      huber_delta: 1.0
+      class_weighting: sqrt_inverse
+      subject_balanced_sampling: true
+      encoder_learning_rate_scale: 0.25
+      freeze_encoder_epochs: 3
+      pulse_pressure_loss_weight: 0.0
+
+  - id: O4_attention_pool
+    description: Learn which pulse tokens should contribute to BP prediction
+    model:
+      pooling: attention
+    training:
+      loss: huber
+      huber_delta: 1.0
+      class_weighting: sqrt_inverse
+      subject_balanced_sampling: true
+      encoder_learning_rate_scale: 0.25
+      freeze_encoder_epochs: 3
+      pulse_pressure_loss_weight: 0.0
+
+  - id: O5_attentive_statistics
+    description: Preserve attention-weighted mean and beat-to-beat variability
+    model:
+      pooling: attentive_statistics
+    training:
+      loss: huber
+      huber_delta: 1.0
+      class_weighting: sqrt_inverse
+      subject_balanced_sampling: true
+      encoder_learning_rate_scale: 0.25
+      freeze_encoder_epochs: 3
+      pulse_pressure_loss_weight: 0.0
+
+  - id: O6_pulse_pressure
+    description: Add an auxiliary physiological pulse-pressure objective
+    model:
+      pooling: attentive_statistics
+    training:
+      loss: huber
+      huber_delta: 1.0
+      class_weighting: balanced
+      label_smoothing: 0.05
+      subject_balanced_sampling: true
+      encoder_learning_rate_scale: 0.25
+      freeze_encoder_epochs: 3
+      pulse_pressure_loss_weight: 0.25

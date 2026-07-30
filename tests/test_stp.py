@@ -15,6 +15,7 @@ from ppg_bp.models import (
     STPEncoder,
     STPPatternAdapter,
     STPSelfSupervisedModel,
+    STPTokenPool,
     transfer_encoder,
 )
 
@@ -58,6 +59,20 @@ def test_stp_three_stage_shapes_and_transfer() -> None:
         pattern.encoder.parameters(),
     ):
         assert torch.equal(source, destination)
+
+
+def test_stp_token_pool_modes() -> None:
+    tokens = torch.randn(3, 16, 8)
+    expected_features = {
+        "mean": 8,
+        "attention": 8,
+        "statistics": 16,
+        "attentive_statistics": 16,
+    }
+    for mode, features in expected_features.items():
+        pooled = STPTokenPool(8, mode)(tokens)
+        assert pooled.shape == (3, features)
+        assert torch.isfinite(pooled).all()
 
 
 def test_all_paper_stp_transformations_reconstruct_original_target() -> None:
@@ -125,3 +140,5 @@ def test_manifest_dataset_modes(tmp_path) -> None:
     assert pretrain[0].shape == (1, 128)
     assert pattern[0][1].dtype == torch.long
     assert bp[0][1].shape == (2,)
+    assert pattern.target_values("patterns").tolist() == [1, 1, 2]
+    assert bp.target_values("labels").shape == (3, 2)
