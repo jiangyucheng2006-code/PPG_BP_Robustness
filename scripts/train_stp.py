@@ -47,6 +47,7 @@ def choose_device(requested: str) -> torch.device:
 def build_loaders(config: dict, stage: str, device: torch.device):
     root = Path(config["data"]["root"])
     sources = tuple(config["data"].get("sources", ()))
+    roles = tuple(config["data"].get("roles", ()))
     maximum_samples = config["data"].get("maximum_samples")
     datasets = {
         split: STPWindowDataset(
@@ -54,6 +55,7 @@ def build_loaders(config: dict, stage: str, device: torch.device):
             split,
             stage,
             sources=sources,
+            roles=roles,
             maximum_samples=maximum_samples,
         )
         for split in ("train", "val", "test")
@@ -218,11 +220,13 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
     config = load_config(args.config)
     stage = str(config["model"]["stage"]).lower()
 
-    seed = int(config.get("seed", 42))
+    seed = int(args.seed if args.seed is not None else config.get("seed", 42))
+    config["seed"] = seed
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -235,20 +239,23 @@ def main() -> None:
     source_checkpoint = config["training"].get("source_checkpoint")
     if stage != "pretrain":
         if not source_checkpoint:
-            raise ValueError(f"{stage} stage requires source_checkpoint")
-        checkpoint_path = Path(source_checkpoint)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(checkpoint_path)
-        source = torch.load(
-            checkpoint_path,
-            map_location=device,
-            weights_only=False,
-        )
-        transfer_encoder(model, source)
-        print(
-            f"Transferred encoder from {checkpoint_path} "
-            f"(stage={source.get('stage', 'unknown')})"
-        )
+            if not bool(config["training"].get("allow_random_init", False)):
+                raise ValueError(f"{stage} stage requires source_checkpoint")
+            print("Using a randomly initialized encoder (explicit ablation).")
+        else:
+            checkpoint_path = Path(source_checkpoint)
+            if not checkpoint_path.exists():
+                raise FileNotFoundError(checkpoint_path)
+            source = torch.load(
+                checkpoint_path,
+                map_location=device,
+                weights_only=False,
+            )
+            transfer_encoder(model, source)
+            print(
+                f"Transferred encoder from {checkpoint_path} "
+                f"(stage={source.get('stage', 'unknown')})"
+            )
 
     transforms = None
     if stage == "pretrain":
@@ -264,10 +271,11 @@ def main() -> None:
             datasets["train"].target_values("labels"),
             dtype=np.float32,
         )
-        target_mean = torch.from_numpy(train_labels.mean(axis=0)).to(device)
-        target_std = torch.from_numpy(
-            train_labels.std(axis=0).clip(min=1.0)
-        ).to(device)
+        if bool(config["training"].get("normalize_targets", True)):
+            target_mean = torch.from_numpy(train_labels.mean(axis=0)).to(device)
+            target_std = torch.from_numpy(
+                train_labels.std(axis=0).clip(min=1.0)
+            ).to(device)
     pulse_pressure_std = torch.tensor(1.0, device=device)
     if stage == "bp":
         pulse_pressure_std = torch.tensor(
@@ -296,17 +304,32 @@ def main() -> None:
         ]
     else:
         parameter_groups = model.parameters()
-    optimizer = torch.optim.AdamW(
+    optimizer_name = str(config["training"].get("optimizer", "adamw")).lower()
+    betas = tuple(float(value) for value in config["training"].get("betas", (0.9, 0.999)))
+    optimizer_class = {
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW,
+    }.get(optimizer_name)
+    if optimizer_class is None:
+        raise ValueError("optimizer must be 'adam' or 'adamw'")
+    optimizer = optimizer_class(
         parameter_groups,
         lr=learning_rate,
+        betas=betas,
         weight_decay=float(config["training"].get("weight_decay", 0)),
     )
     epochs = int(config["training"]["epochs"])
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=epochs,
-        eta_min=float(config["training"].get("minimum_learning_rate", 1e-6)),
-    )
+    scheduler_name = str(config["training"].get("scheduler", "cosine")).lower()
+    if scheduler_name == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=epochs,
+            eta_min=float(config["training"].get("minimum_learning_rate", 1e-6)),
+        )
+    elif scheduler_name in {"none", "constant"}:
+        scheduler = None
+    else:
+        raise ValueError("scheduler must be 'cosine' or 'none'")
     use_amp = bool(config["training"].get("amp", True)) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     patience = int(config["training"].get("early_stopping_patience", 10))
@@ -335,7 +358,8 @@ def main() -> None:
         checkpoint = torch.load(last_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
-        scheduler.load_state_dict(checkpoint["scheduler"])
+        if scheduler is not None and checkpoint.get("scheduler") is not None:
+            scheduler.load_state_dict(checkpoint["scheduler"])
         scaler.load_state_dict(checkpoint["scaler"])
         best_score = float(checkpoint["best_score"])
         epochs_without_improvement = int(checkpoint["epochs_without_improvement"])
@@ -477,7 +501,8 @@ def main() -> None:
             )
         else:
             epochs_without_improvement += 1
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
         torch.save(
             {
                 "stage": stage,
@@ -485,7 +510,7 @@ def main() -> None:
                 "model": model.state_dict(),
                 "encoder": model.encoder.state_dict(),
                 "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
+                "scheduler": scheduler.state_dict() if scheduler is not None else None,
                 "scaler": scaler.state_dict(),
                 "config": config,
                 "target_mean": target_mean.cpu(),

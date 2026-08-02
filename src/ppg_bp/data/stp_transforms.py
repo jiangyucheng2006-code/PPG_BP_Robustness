@@ -39,6 +39,7 @@ class STPTransformBank:
         minimum_severity: float = 0.25,
         maximum_severity: float = 1.0,
         include_identity: bool = False,
+        paper_disclosed: bool = False,
     ) -> None:
         self.transforms = tuple(transforms)
         unknown = set(self.transforms).difference(STP_RECONSTRUCTION_TRANSFORMS)
@@ -52,6 +53,7 @@ class STPTransformBank:
         self.minimum_severity = float(minimum_severity)
         self.maximum_severity = float(maximum_severity)
         self.include_identity = bool(include_identity)
+        self.paper_disclosed = bool(paper_disclosed)
 
     @staticmethod
     def _generator(device: torch.device, seed: int | None) -> torch.Generator | None:
@@ -133,11 +135,14 @@ class STPTransformBank:
 
     def _powerline_noise(self, x, severity, generator):
         batch, samples = x.shape
-        frequency = torch.where(
-            torch.rand(batch, device=x.device, generator=generator) < 0.5,
-            50.0,
-            60.0,
-        )
+        if self.paper_disclosed:
+            frequency = torch.full((batch,), 50.0, device=x.device)
+        else:
+            frequency = torch.where(
+                torch.rand(batch, device=x.device, generator=generator) < 0.5,
+                50.0,
+                60.0,
+            )
         phase = 2 * torch.pi * torch.rand(batch, device=x.device, generator=generator)
         time = torch.arange(samples, device=x.device) / self.sampling_rate
         wave = torch.sin(2 * torch.pi * frequency[:, None] * time + phase[:, None])
@@ -166,21 +171,47 @@ class STPTransformBank:
             * impulse_mask
             * self._range(x)[:, None]
         )
-        return (
+        corrupted = (
             x
             + low_frequency
             * (0.02 + 0.18 * severity)[:, None]
             * self._range(x)[:, None]
             + impulses * severity[:, None]
         )
+        if not self.paper_disclosed:
+            return corrupted
+        output = x.clone()
+        samples = x.shape[1]
+        for row in range(len(x)):
+            fraction = 0.01 + 0.09 * float(severity[row])
+            length = max(1, int(round(samples * fraction)))
+            start = int(
+                torch.randint(
+                    0,
+                    max(1, samples - length + 1),
+                    (),
+                    device=x.device,
+                    generator=generator,
+                )
+            )
+            output[row, start : start + length] = corrupted[
+                row,
+                start : start + length,
+            ]
+        return output
 
     def _baseline_drift(self, x, severity, generator):
         batch, samples = x.shape
         time = torch.arange(samples, device=x.device) / self.sampling_rate
-        frequency = 0.05 + 0.45 * torch.rand(
-            batch,
-            device=x.device,
-            generator=generator,
+        frequency = (
+            torch.full((batch,), 0.05, device=x.device)
+            if self.paper_disclosed
+            else 0.05
+            + 0.45 * torch.rand(
+                batch,
+                device=x.device,
+                generator=generator,
+            )
         )
         phase = 2 * torch.pi * torch.rand(batch, device=x.device, generator=generator)
         drift = torch.sin(2 * torch.pi * frequency[:, None] * time + phase[:, None])
@@ -194,6 +225,38 @@ class STPTransformBank:
         """Approximate respiratory sinus arrhythmia by smooth time modulation."""
 
         batch, samples = x.shape
+        if self.paper_disclosed:
+            time = torch.arange(samples, device=x.device) / self.sampling_rate
+            respiratory_frequency = 0.15 + 0.25 * torch.rand(
+                batch,
+                device=x.device,
+                generator=generator,
+            )
+            phase = 2 * torch.pi * torch.rand(
+                batch,
+                device=x.device,
+                generator=generator,
+            )
+            speed = 1 + 0.05 * severity[:, None] * torch.sin(
+                2 * torch.pi * respiratory_frequency[:, None] * time
+                + phase[:, None]
+            )
+            locations = torch.cumsum(speed, dim=1)
+            locations = (locations - locations[:, :1]) / (
+                locations[:, -1:] - locations[:, :1]
+            ).clamp_min(1e-6)
+            locations = locations * 2 - 1
+            grid = torch.stack(
+                (locations, torch.zeros_like(locations)),
+                dim=-1,
+            )[:, None]
+            return F.grid_sample(
+                x[:, None, None],
+                grid,
+                mode="bilinear",
+                padding_mode="border",
+                align_corners=True,
+            )[:, 0, 0]
         control_points = 9
         random_curve = torch.randn(
             batch,
@@ -228,6 +291,41 @@ class STPTransformBank:
         output = x.clone()
         samples = x.shape[1]
         for row in range(len(x)):
+            if self.paper_disclosed:
+                masked_probability = float(0.05 + 0.35 * severity[row])
+                masked_mean = max(1.0, samples * 0.04)
+                unmasked_mean = masked_mean * (1 - masked_probability) / max(
+                    masked_probability,
+                    1e-6,
+                )
+                position = 0
+                masked = False
+                while position < samples:
+                    mean_length = masked_mean if masked else unmasked_mean
+                    probability = min(1.0, 1.0 / max(mean_length, 1.0))
+                    uniform = torch.rand(
+                        (),
+                        device=x.device,
+                        generator=generator,
+                    ).clamp_min(torch.finfo(x.dtype).eps)
+                    run = int(
+                        torch.floor(
+                            torch.log(uniform)
+                            / torch.log(
+                                torch.tensor(
+                                    1 - probability,
+                                    device=x.device,
+                                    dtype=x.dtype,
+                                ).clamp_min(torch.finfo(x.dtype).eps)
+                            )
+                        )
+                    ) + 1
+                    stop = min(samples, position + run)
+                    if masked:
+                        output[row, position:stop] = 0
+                    position = stop
+                    masked = not masked
+                continue
             length = max(2, int(samples * (0.03 + 0.15 * float(severity[row]))))
             start = int(
                 torch.randint(
@@ -315,4 +413,5 @@ def build_stp_transform_bank(
         minimum_severity=float(config.get("minimum_severity", 0.25)),
         maximum_severity=float(config.get("maximum_severity", 1.0)),
         include_identity=bool(config.get("include_identity", False)),
+        paper_disclosed=bool(config.get("paper_disclosed", False)),
     )

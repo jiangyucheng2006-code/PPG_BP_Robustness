@@ -21,6 +21,28 @@ from torch import nn
 from torch.nn import functional as F
 
 
+class _GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, inputs: torch.Tensor, strength: float) -> torch.Tensor:
+        ctx.strength = float(strength)
+        return inputs.view_as(inputs)
+
+    @staticmethod
+    def backward(ctx, gradient: torch.Tensor):
+        return -ctx.strength * gradient, None
+
+
+class GradientReversal(nn.Module):
+    """Identity in the forward pass and sign reversal in backpropagation."""
+
+    def __init__(self, strength: float = 1.0) -> None:
+        super().__init__()
+        self.strength = float(strength)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return _GradientReversalFunction.apply(inputs, self.strength)
+
+
 class STPEncoder(nn.Module):
     """One-dimensional convolutional projection and Transformer encoder."""
 
@@ -186,7 +208,12 @@ class STPSelfSupervisedModel(nn.Module):
         memory = self.encoder(transformed_ppg)
         queries = self.decoder_queries.expand(len(transformed_ppg), -1, -1)
         queries = queries + self.encoder.position_embedding
-        decoded = self.decoder(queries, memory)
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(
+            self.encoder.token_count,
+            device=queries.device,
+            dtype=queries.dtype,
+        )
+        decoded = self.decoder(queries, memory, tgt_mask=causal_mask)
         patches = self.reconstruction_head(decoded)
         reconstructed = patches.reshape(
             len(transformed_ppg),
@@ -201,6 +228,41 @@ class STPSelfSupervisedModel(nn.Module):
         )
 
 
+class STPPatchDiscriminator(nn.Module):
+    """One-dimensional PatchGAN used for three BP-pattern classes.
+
+    The disclosed method first reduces the encoder feature map to a ``1 x N``
+    sequence, predicts local pattern responses, then averages those responses
+    for the final class prediction.
+    """
+
+    def __init__(
+        self,
+        *,
+        classes: int = 3,
+        hidden_features: int = 128,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        middle = max(16, hidden_features // 2)
+        self.network = nn.Sequential(
+            nn.Conv1d(1, hidden_features, kernel_size=7, padding=3),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(dropout),
+            nn.Conv1d(hidden_features, hidden_features, kernel_size=5, padding=2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(dropout),
+            nn.Conv1d(hidden_features, middle, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(middle, classes, kernel_size=3, padding=1),
+        )
+
+    def forward(self, tokens: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        sequence = tokens.mean(dim=-1, keepdim=True).transpose(1, 2)
+        patch_logits = self.network(sequence)
+        return patch_logits.mean(dim=-1), patch_logits
+
+
 class STPPatternAdapter(nn.Module):
     """Transferred encoder and three-class BP-pattern discriminator."""
 
@@ -212,27 +274,49 @@ class STPPatternAdapter(nn.Module):
         hidden_features: int = 128,
         dropout: float = 0.2,
         pooling: str = "mean",
+        discriminator: str = "mlp",
+        gradient_reversal_strength: float = 1.0,
     ) -> None:
         super().__init__()
         self.encoder = encoder
         self.pool = STPTokenPool(encoder.embedding_dim, pooling)
-        self.pattern_discriminator = nn.Sequential(
-            nn.LayerNorm(self.pool.output_features),
-            nn.Linear(self.pool.output_features, hidden_features),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_features, classes),
-        )
+        self.discriminator_kind = str(discriminator).lower()
+        self.gradient_reversal = GradientReversal(gradient_reversal_strength)
+        if self.discriminator_kind == "patchgan":
+            self.pattern_discriminator = STPPatchDiscriminator(
+                classes=classes,
+                hidden_features=hidden_features,
+                dropout=dropout,
+            )
+        elif self.discriminator_kind == "mlp":
+            self.pattern_discriminator = nn.Sequential(
+                nn.LayerNorm(self.pool.output_features),
+                nn.Linear(self.pool.output_features, hidden_features),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_features, classes),
+            )
+        else:
+            raise ValueError("discriminator must be 'mlp' or 'patchgan'")
 
     def forward(
         self,
         signal: torch.Tensor,
         *,
         return_features: bool = False,
+        return_patch_logits: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         tokens = self.encoder(signal)
         features = self.pool(tokens)
-        logits = self.pattern_discriminator(features)
+        if self.discriminator_kind == "patchgan":
+            logits, patch_logits = self.pattern_discriminator(
+                self.gradient_reversal(tokens)
+            )
+        else:
+            logits = self.pattern_discriminator(features)
+            patch_logits = logits[..., None]
+        if return_patch_logits:
+            return logits, patch_logits
         if return_features:
             return logits, features
         return logits
@@ -308,6 +392,10 @@ def build_stp_model(config: Mapping[str, object]) -> nn.Module:
             hidden_features=int(config.get("head_features", 128)),
             dropout=float(config.get("head_dropout", 0.2)),
             pooling=str(config.get("pooling", "mean")),
+            discriminator=str(config.get("discriminator", "mlp")),
+            gradient_reversal_strength=float(
+                config.get("gradient_reversal_strength", 1.0)
+            ),
         )
     if stage == "bp":
         return STPBPRegressor(

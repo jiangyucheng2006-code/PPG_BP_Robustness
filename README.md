@@ -70,14 +70,18 @@ clean-to-corrupted prediction shift from 17.384 to 2.374 mmHg. The synthetic
 corruptions, aggregate results, and limitations are documented in
 [`results/robustness_c0_c6`](results/robustness_c0_c6).
 
-A separate S1-S3 track now reproduces the published STP architecture as
-closely as the public information allows: transformed-signal reconstruction
-with a Transformer encoder-decoder, three-class BP-pattern adaptation, and
-SBP/DBP regression with sequential encoder transfer. It uses WESAD and
-PPG-DaLiA for unpaired pretraining and MIMIC-III PPG/ABP for the two downstream
-stages. The private Mindray cohort is omitted. Confirmed details, provisional
-hyperparameters, data preparation, and run commands are documented in
-[`docs/STP_REPRODUCTION.md`](docs/STP_REPRODUCTION.md).
+A separate F1-F3 track implements a public-method reproduction of STP:
+transformed-signal reconstruction with a Transformer encoder-decoder,
+three-class BP-pattern adaptation with GRL/PatchGAN, and SBP/DBP regression
+with sequential encoder transfer. The audited public cohort contains 300
+unpaired MIMIC-III subjects, 15 WESAD subjects, 15 PPG-DaLiA subjects, and a
+disjoint 200-subject paired MIMIC-III cohort. The paper's private 683-subject
+cohort and several architecture/training hyperparameters are unavailable, so
+this is not presented as an exact reproduction of the reported 1,213-subject
+result. The evidence boundary is recorded in
+[`docs/STP_METHOD_AUDIT.md`](docs/STP_METHOD_AUDIT.md), and the executable
+workflow is documented in
+[`docs/STP_FAITHFUL_PUBLIC_REPRODUCTION.md`](docs/STP_FAITHFUL_PUBLIC_REPRODUCTION.md).
 
 ## Installation
 
@@ -155,14 +159,16 @@ python scripts/run_c_suite.py `
 Run the faithful public-data STP reproduction sequentially with:
 
 ```powershell
-python scripts/train_stp.py `
-  --config configs/stp_s1_public_pretrain.yaml `
-  --output outputs/stp_s1_public_pretrain `
-  --resume
+powershell -ExecutionPolicy Bypass -File `
+  scripts\run_stp_faithful_public.ps1 `
+  -SkipDataPreparation `
+  -RunName stp_public_method_v2
 ```
 
-Continue with S2 and S3 using the commands in
-[`docs/STP_REPRODUCTION.md`](docs/STP_REPRODUCTION.md).
+The runner first performs a strict dataset audit and then executes F1, F2, and
+F3 in sequence inside one isolated run directory. It never loads checkpoints
+from earlier STP attempts. Previous public-method results are preserved in
+[`results/stp_faithful_public_previous`](results/stp_faithful_public_previous).
 
 Run the repeated STP downstream optimization matrix with:
 
@@ -171,7 +177,8 @@ python scripts/run_stp_optimization_suite.py
 ```
 
 The 63-stage, multi-seed comparison is described in
-[`docs/STP_OPTIMIZATION.md`](docs/STP_OPTIMIZATION.md).
+[`docs/STP_OPTIMIZATION.md`](docs/STP_OPTIMIZATION.md), with its compact result
+table in [`results/stp_optimization_suite`](results/stp_optimization_suite).
 
 The smoke configuration is limited to pipeline verification:
 

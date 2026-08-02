@@ -9,6 +9,9 @@ from ppg_bp.data import (
     STPWindowDataset,
     bp_pattern_labels,
     cycle_windows,
+    filter_abp_fir,
+    template_quality_mask,
+    wavelet_filter_ppg,
 )
 from ppg_bp.models import (
     STPBPRegressor,
@@ -107,6 +110,44 @@ def test_five_cycle_window_and_bp_patterns() -> None:
     assert bounds.shape == (len(windows), 2)
     labels = np.asarray([[85, 55], [120, 75], [145, 95]], dtype=np.float32)
     assert bp_pattern_labels(labels).tolist() == [0, 1, 2]
+    threshold_labels = np.asarray(
+        [[90, 60], [129, 79], [130, 79], [120, 80]],
+        dtype=np.float32,
+    )
+    assert bp_pattern_labels(threshold_labels).tolist() == [1, 1, 2, 2]
+
+
+def test_stp_disclosed_filters_and_template_screening() -> None:
+    sampling_rate = 125
+    time = np.arange(90 * sampling_rate) / sampling_rate
+    clean = np.sin(2 * np.pi * 1.2 * time)
+    noisy_ppg = clean + 0.4 * np.sin(2 * np.pi * 45 * time) + 0.2
+    filtered_ppg = wavelet_filter_ppg(noisy_ppg)
+    filtered_abp = filter_abp_fir(
+        100 + 20 * clean + 2 * np.sin(2 * np.pi * 50 * time),
+        sampling_rate,
+    )
+    assert filtered_ppg.shape == noisy_ppg.shape
+    assert filtered_abp.shape == noisy_ppg.shape
+    assert np.isfinite(filtered_ppg).all()
+    windows = np.stack([clean[:128], clean[:128] + 0.01, -clean[:128]])
+    valid, statistics = template_quality_mask(windows, standard_deviations=1.0)
+    assert valid.tolist() == [True, True, False]
+    assert statistics["correlation_lower"] < 1
+
+
+def test_stp_patchgan_pattern_adapter() -> None:
+    model = STPPatternAdapter(
+        small_encoder(),
+        hidden_features=16,
+        discriminator="patchgan",
+        gradient_reversal_strength=1.0,
+    )
+    inputs = torch.randn(2, 1, 128)
+    logits, patch_logits = model(inputs, return_patch_logits=True)
+    assert logits.shape == (2, 3)
+    assert patch_logits.shape[:2] == (2, 3)
+    assert patch_logits.shape[-1] == small_encoder().token_count
 
 
 def test_manifest_dataset_modes(tmp_path) -> None:

@@ -43,9 +43,9 @@ The complete matrix contains:
 - 21 S2 runs and 42 S3 runs;
 - 63 sequential training stages in total.
 
-Each stage permits up to 120 epochs with 25-epoch early stopping. Based on the
-measured throughput of the first run, the expected wall-clock duration is
-approximately 9-14 hours. Multiple seeds are required because a single
+Each stage permits up to 120 epochs with eight-epoch early stopping. Based on
+the measured throughput of the first run, the expected wall-clock duration is
+approximately 7-10 hours. Multiple seeds are required because a single
 favorable initialization is not sufficient evidence of improvement.
 
 The queue is resumable. Every stage stores its resolved configuration,

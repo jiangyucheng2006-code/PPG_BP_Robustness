@@ -23,9 +23,11 @@ from .xresnet1d import XResNet1D, xresnet1d50, xresnet1d101
 from .multitask import PhysiologyGuidedMultiTaskModel
 from .robustness import ArtifactAwareBPModel
 from .stp import (
+    GradientReversal,
     STPBPRegressor,
     STPEncoder,
     STPPatternAdapter,
+    STPPatchDiscriminator,
     STPSelfSupervisedModel,
     STPTokenPool,
     build_stp_encoder,
@@ -126,8 +128,10 @@ __all__ = [
     "PhysiologyGuidedMultiTaskModel",
     "ArtifactAwareBPModel",
     "STPBPRegressor",
+    "GradientReversal",
     "STPEncoder",
     "STPPatternAdapter",
+    "STPPatchDiscriminator",
     "STPSelfSupervisedModel",
     "STPTokenPool",
     "build_stp_encoder",

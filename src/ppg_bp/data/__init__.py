@@ -14,8 +14,13 @@ from .stp import (
     STPWindowDataset,
     bp_pattern_labels,
     cycle_windows,
+    filter_abp_fir,
     filter_ppg,
+    is_flatline,
     normalize_ppg,
+    resample_to_125hz,
+    template_quality_mask,
+    wavelet_filter_ppg,
 )
 from .stp_transforms import (
     STP_RECONSTRUCTION_TRANSFORMS,
@@ -38,6 +43,11 @@ __all__ = [
     "bp_pattern_labels",
     "build_stp_transform_bank",
     "cycle_windows",
+    "filter_abp_fir",
     "filter_ppg",
+    "is_flatline",
     "normalize_ppg",
+    "resample_to_125hz",
+    "template_quality_mask",
+    "wavelet_filter_ppg",
 ]

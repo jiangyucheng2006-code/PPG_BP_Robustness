@@ -1,0 +1,15 @@
+variant,transfer_path,mean_sbp_mae,mean_dbp_mae,mean_of_mean_mae
+O0_control,direct_s1,21.9144,12.8319,17.3732
+O0_control,via_s2,23.1096,12.8329,17.9712
+O1_robust_objectives,direct_s1,21.1395,11.8808,16.5102
+O1_robust_objectives,via_s2,22.8086,12.4625,17.6356
+O2_subject_balance,direct_s1,21.3954,12.2939,16.8447
+O2_subject_balance,via_s2,23.6430,12.6791,18.1610
+O3_encoder_protection,direct_s1,22.3969,11.8760,17.1365
+O3_encoder_protection,via_s2,22.3969,11.8760,17.1365
+O4_attention_pool,direct_s1,22.2105,11.7067,16.9586
+O4_attention_pool,via_s2,22.2105,11.7067,16.9586
+O5_attentive_statistics,direct_s1,22.1620,11.6966,16.9293
+O5_attentive_statistics,via_s2,22.1620,11.6966,16.9293
+O6_pulse_pressure,direct_s1,21.9924,11.8195,16.9059
+O6_pulse_pressure,via_s2,21.9924,11.8195,16.9059

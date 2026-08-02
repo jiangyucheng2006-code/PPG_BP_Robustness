@@ -1,0 +1,8 @@
+experiment,transfer_path,seed,sbp_mae,dbp_mae,mean_mae,sbp_error_std,dbp_error_std
+full_seed73,F1_to_F2_to_F3,73,22.9158,12.9205,17.9182,29.3995,16.5187
+scratch_seed42,random_to_F3,42,23.3838,12.7981,18.0910,29.5819,16.7149
+direct_s1_seed42,F1_to_F3,42,24.2699,12.8194,18.5447,28.4355,15.3211
+full_seed137,F1_to_F2_to_F3,137,24.4365,13.1289,18.7827,29.8977,16.6089
+scratch_seed73,random_to_F3,73,25.3054,13.2696,19.2875,31.3751,17.0136
+full_seed42,F1_to_F2_to_F3,42,25.5875,13.2423,19.4149,30.0960,16.4807
+direct_s1_seed73,F1_to_F3,73,25.3375,13.7948,19.5661,29.9953,16.7287
