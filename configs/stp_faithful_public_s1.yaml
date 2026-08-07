@@ -1,0 +1,54 @@
+experiment:
+  id: STP-F1
+  description: Public-data faithful STP self-supervised reconstruction
+  fidelity: disclosed method reproduced; undisclosed network depth and transform amplitudes are provisional
+seed: 42
+data:
+  root: "${STP_DATA_ROOT}"
+  sources: [MIMICIII, WESAD, PPGDaLiA]
+  roles: [pretrain_unpaired]
+  sampling_rate: 125
+  segmentation: fixed_length
+model:
+  name: stp
+  stage: pretrain
+  input_channels: 1
+  signal_length: 512
+  patch_size: 1
+  embedding_dim: 128
+  encoder_layers: 4
+  decoder_layers: 2
+  attention_heads: 8
+  feedforward_dim: 256
+  dropout: 0.1
+training:
+  epochs: 50
+  batch_size: 8
+  optimizer: adam
+  learning_rate: 0.001
+  betas: [0.8, 0.999]
+  scheduler: none
+  weight_decay: 0.0
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 8
+  num_workers: 8
+  amp: true
+  device: auto
+pretraining:
+  transforms:
+    paper_disclosed: true
+    minimum_severity: 0.25
+    maximum_severity: 1.0
+    include_identity: false
+    transforms:
+      - gaussian_noise
+      - powerline_noise
+      - motion_artifacts
+      - baseline_drift
+      - rsa
+      - random_mask
+      - hard_clipping
+      - amplitude_negation
+      - temporal_inversion
+      - temporal_permutation
+      - temporal_warping

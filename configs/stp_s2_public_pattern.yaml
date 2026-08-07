@@ -1,0 +1,35 @@
+experiment:
+  id: S2
+  description: STP three-class BP pattern adaptation
+  fidelity: paper-confirmed stage; exact published adversarial equation is unavailable
+seed: 42
+data:
+  root: "${PPG_BP_DATA_ROOT}/processed/stp_public"
+  sources: [MIMICIII]
+model:
+  name: stp
+  stage: pattern
+  input_channels: 1
+  signal_length: 512
+  patch_size: 8
+  embedding_dim: 128
+  encoder_layers: 4
+  attention_heads: 8
+  feedforward_dim: 256
+  dropout: 0.1
+  pattern_classes: 3
+  head_features: 128
+  head_dropout: 0.2
+training:
+  source_checkpoint: "outputs/stp_s1_public_pretrain/best.pt"
+  epochs: 30
+  batch_size: 256
+  learning_rate: 0.0001
+  minimum_learning_rate: 0.000001
+  weight_decay: 0.0001
+  label_smoothing: 0.0
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 6
+  num_workers: 8
+  amp: true
+  device: auto

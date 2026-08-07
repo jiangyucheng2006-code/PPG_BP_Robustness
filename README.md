@@ -70,6 +70,19 @@ clean-to-corrupted prediction shift from 17.384 to 2.374 mmHg. The synthetic
 corruptions, aggregate results, and limitations are documented in
 [`results/robustness_c0_c6`](results/robustness_c0_c6).
 
+A separate F1-F3 track implements a public-method reproduction of STP:
+transformed-signal reconstruction with a Transformer encoder-decoder,
+three-class BP-pattern adaptation with GRL/PatchGAN, and SBP/DBP regression
+with sequential encoder transfer. The audited public cohort contains 300
+unpaired MIMIC-III subjects, 15 WESAD subjects, 15 PPG-DaLiA subjects, and a
+disjoint 200-subject paired MIMIC-III cohort. The paper's private 683-subject
+cohort and several architecture/training hyperparameters are unavailable, so
+this is not presented as an exact reproduction of the reported 1,213-subject
+result. The evidence boundary is recorded in
+[`docs/STP_METHOD_AUDIT.md`](docs/STP_METHOD_AUDIT.md), and the executable
+workflow is documented in
+[`docs/STP_FAITHFUL_PUBLIC_REPRODUCTION.md`](docs/STP_FAITHFUL_PUBLIC_REPRODUCTION.md).
+
 ## Installation
 
 Python 3.10 or later is required.
@@ -142,6 +155,32 @@ Run the complete C-series robustness suite with:
 python scripts/run_c_suite.py `
   --status outputs/c_robustness_suite/status.json
 ```
+
+Run the faithful public-data STP reproduction sequentially with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File `
+  scripts\run_stp_faithful_public.ps1 `
+  -RunName stp_public_method_v4 `
+  -ProcessedName stp_public_method_v4
+```
+
+The runner first performs a strict dataset audit and then executes F1, F2, and
+F3 in sequence inside one isolated run directory. It never loads checkpoints
+from earlier STP attempts. Previous public-method results are preserved in
+[`results/stp_faithful_public_previous`](results/stp_faithful_public_previous).
+The completed v4 audit and held-out results are summarized in
+[`results/stp_public_reproduction`](results/stp_public_reproduction).
+
+Run the repeated STP downstream optimization matrix with:
+
+```powershell
+python scripts/run_stp_optimization_suite.py
+```
+
+The 63-stage, multi-seed comparison is described in
+[`docs/STP_OPTIMIZATION.md`](docs/STP_OPTIMIZATION.md), with its compact result
+table in [`results/stp_optimization_suite`](results/stp_optimization_suite).
 
 The smoke configuration is limited to pipeline verification:
 

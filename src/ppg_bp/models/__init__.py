@@ -22,6 +22,18 @@ from .qumphy_xresnet1d import (
 from .xresnet1d import XResNet1D, xresnet1d50, xresnet1d101
 from .multitask import PhysiologyGuidedMultiTaskModel
 from .robustness import ArtifactAwareBPModel
+from .stp import (
+    GradientReversal,
+    STPBPRegressor,
+    STPEncoder,
+    STPPatternAdapter,
+    STPPatchDiscriminator,
+    STPSelfSupervisedModel,
+    STPTokenPool,
+    build_stp_encoder,
+    build_stp_model,
+    transfer_encoder,
+)
 
 
 def build_model(model_config: dict):
@@ -48,6 +60,8 @@ def build_model(model_config: dict):
             hidden_features=int(model_config.get("hidden_features", 128)),
             dropout=float(model_config.get("artifact_dropout", 0.2)),
         )
+    if model_name == "stp":
+        return build_stp_model(model_config)
 
     factories = {
         "xresnet1d": {50: xresnet1d50, 101: xresnet1d101},
@@ -113,6 +127,16 @@ __all__ = [
     "XResNet1D",
     "PhysiologyGuidedMultiTaskModel",
     "ArtifactAwareBPModel",
+    "STPBPRegressor",
+    "GradientReversal",
+    "STPEncoder",
+    "STPPatternAdapter",
+    "STPPatchDiscriminator",
+    "STPSelfSupervisedModel",
+    "STPTokenPool",
+    "build_stp_encoder",
+    "build_stp_model",
+    "transfer_encoder",
     "xresnet1d50",
     "xresnet1d101",
     "build_model",

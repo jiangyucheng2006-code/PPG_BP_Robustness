@@ -1,0 +1,41 @@
+experiment:
+  id: STP-A-SCRATCH
+  description: Ablation - BP regression with a randomly initialized encoder
+  comparison: tests the contribution of self-supervised and BP-pattern transfer
+seed: 42
+data:
+  root: "${STP_DATA_ROOT}"
+  sources: [MIMICIII]
+  roles: [supervised_paired]
+model:
+  name: stp
+  stage: bp
+  input_channels: 1
+  signal_length: 512
+  patch_size: 1
+  embedding_dim: 128
+  encoder_layers: 4
+  attention_heads: 8
+  feedforward_dim: 256
+  dropout: 0.1
+  outputs: 2
+  head_features: 128
+  head_dropout: 0.2
+  pooling: mean
+training:
+  allow_random_init: true
+  epochs: 50
+  batch_size: 8
+  optimizer: adam
+  learning_rate: 0.001
+  betas: [0.8, 0.999]
+  scheduler: none
+  weight_decay: 0.0
+  normalize_targets: false
+  loss: mse
+  pulse_pressure_loss_weight: 0.0
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 8
+  num_workers: 8
+  amp: true
+  device: auto
