@@ -174,6 +174,38 @@ def normalize_ppg(signal: np.ndarray) -> np.ndarray:
     return ((signal - minimum) / scale).astype(np.float32)
 
 
+def fixed_length_windows(
+    signal: np.ndarray,
+    *,
+    window_samples: int = 512,
+    stride_samples: int | None = None,
+    normalize_windows: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cut the self-supervised PPG source into fixed-length windows."""
+
+    signal = repair_nonfinite(signal).astype(np.float32)
+    if window_samples <= 0:
+        raise ValueError("window_samples must be positive")
+    stride = window_samples if stride_samples is None else int(stride_samples)
+    if stride <= 0:
+        raise ValueError("stride_samples must be positive")
+    windows: list[np.ndarray] = []
+    bounds: list[tuple[int, int]] = []
+    for start in range(0, max(0, len(signal) - window_samples + 1), stride):
+        stop = start + window_samples
+        segment = signal[start:stop]
+        if normalize_windows:
+            segment = normalize_ppg(segment)
+        windows.append(np.asarray(segment, dtype=np.float32))
+        bounds.append((start, stop))
+    if not windows:
+        return (
+            np.empty((0, window_samples), dtype=np.float32),
+            np.empty((0, 2), dtype=np.int64),
+        )
+    return np.stack(windows), np.asarray(bounds, dtype=np.int64)
+
+
 def filter_ppg(
     signal: np.ndarray,
     sampling_rate: float,
@@ -208,17 +240,20 @@ def cycle_windows(
     sampling_rate: float,
     *,
     cycles: int = 5,
-    stride_cycles: int = 2,
+    overlap_cycles: int = 2,
     output_samples: int = 512,
     filter_method: str = "butter",
+    normalize_windows: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract five-cycle windows with a two-cycle stride.
+    """Extract five-cycle windows with a two-cycle overlap.
 
     Returns the resampled windows and their original ``[start, stop)`` sample
     locations.  The cycle/stride values are directly confirmed by Fig. 1 of
     the paper.
     """
 
+    if cycles <= 0 or not 0 <= overlap_cycles < cycles:
+        raise ValueError("overlap_cycles must satisfy 0 <= overlap < cycles")
     if filter_method == "butter":
         filtered = filter_ppg(signal, sampling_rate)
     elif filter_method == "stp_db8":
@@ -235,13 +270,16 @@ def cycle_windows(
     )
     windows: list[np.ndarray] = []
     bounds: list[tuple[int, int]] = []
-    for peak_index in range(0, max(0, len(peaks) - cycles), stride_cycles):
+    step_cycles = cycles - overlap_cycles
+    for peak_index in range(0, max(0, len(peaks) - cycles), step_cycles):
         start = int(peaks[peak_index])
         stop = int(peaks[peak_index + cycles])
         if stop - start < max(8, int(1.5 * sampling_rate)):
             continue
-        segment = normalize_ppg(filtered[start:stop])
-        windows.append(resample(segment, output_samples).astype(np.float32))
+        segment = resample(filtered[start:stop], output_samples).astype(np.float32)
+        if normalize_windows:
+            segment = normalize_ppg(segment)
+        windows.append(segment)
         bounds.append((start, stop))
     if not windows:
         return (

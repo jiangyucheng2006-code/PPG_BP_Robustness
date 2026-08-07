@@ -4,7 +4,7 @@ experiment:
   fidelity: disclosed Transformer transfer, GRL and PatchGAN reproduced; layer widths are provisional
 seed: 42
 data:
-  root: "${PPG_BP_DATA_ROOT}/processed/stp_faithful_public"
+  root: "${STP_DATA_ROOT}"
   sources: [MIMICIII]
   roles: [supervised_paired]
 model:

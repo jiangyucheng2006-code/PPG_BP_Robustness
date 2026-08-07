@@ -257,8 +257,13 @@ class STPPatchDiscriminator(nn.Module):
             nn.Conv1d(middle, classes, kernel_size=3, padding=1),
         )
 
-    def forward(self, tokens: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        sequence = tokens.mean(dim=-1, keepdim=True).transpose(1, 2)
+    def forward(self, features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if features.ndim != 2:
+            raise ValueError(
+                "STP PatchGAN expects the 1 x N vector produced by global "
+                "average pooling"
+            )
+        sequence = features.unsqueeze(1)
         patch_logits = self.network(sequence)
         return patch_logits.mean(dim=-1), patch_logits
 
@@ -308,12 +313,13 @@ class STPPatternAdapter(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         tokens = self.encoder(signal)
         features = self.pool(tokens)
+        adversarial_features = self.gradient_reversal(features)
         if self.discriminator_kind == "patchgan":
             logits, patch_logits = self.pattern_discriminator(
-                self.gradient_reversal(tokens)
+                adversarial_features
             )
         else:
-            logits = self.pattern_discriminator(features)
+            logits = self.pattern_discriminator(adversarial_features)
             patch_logits = logits[..., None]
         if return_patch_logits:
             return logits, patch_logits

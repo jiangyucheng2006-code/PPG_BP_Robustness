@@ -27,7 +27,9 @@ subjects or guarantee the reported result.
 The executable public reproduction uses 530 subjects when all requested public
 records pass quality screening. The 200 paired subjects are split by subject at
 70/15/15, producing 140/30/30 subjects. The unpaired sources are also split by
-subject for leakage-free reconstruction evaluation.
+subject for leakage-free reconstruction evaluation. Paired and unpaired MIMIC
+records are discovered from the matched database by canonical patient ID, and
+the audit rejects any patient appearing in both roles.
 
 ## Disclosed preprocessing reproduced
 
@@ -36,25 +38,40 @@ subject for leakage-free reconstruction evaluation.
   groups cD3--cD1, then reconstruct;
 - ABP: 0.5--35 Hz FIR band-pass;
 - reject horizontal/missing waveforms from first differences;
+- reject any window that overlaps a sample that was missing before temporary
+  interpolation for filtering/resampling;
 - reject BP windows with DBP below 25 mmHg or SBP not above DBP;
 - create an average PPG template within each record and reject windows whose
   mean difference is too high or correlation too low using 3-sigma thresholds;
-- min-max normalize each PPG window to [0, 1];
+- apply template screening before min-max normalizing each retained PPG window
+  to [0, 1];
 - align paired PPG and ABP by maximum cross-correlation within 500 ms;
-- segment paired records into five-cycle windows with a two-cycle stride;
+- segment paired records into five-cycle windows with a two-cycle overlap
+  (therefore advance three cycles per window);
+- segment self-supervised PPG into fixed-length windows;
 - assign BP pattern labels as hypotension (<90 SBP or <60 DBP), hypertension
   (>=130 SBP or >=80 DBP), and normal otherwise.
 
 Every processed manifest entry records its role, source, split, filters, phase
 lag, and quality thresholds so exclusions are auditable.
 
+Before training, the strict audit opens every subject array and verifies its
+shape, finite values, [0, 1] PPG range, BP validity, BP-pattern consistency,
+exact role/split counts, and absence of cross-role or cross-split patient
+overlap. A file merely existing is not sufficient to pass.
+
 ## Disclosed model/training reproduced
 
 1. F1: one-dimensional projection plus positional embedding, Transformer
    encoder, causally masked Transformer decoder, and reconstruction MSE after
-   one of eleven PPG transformations.
-2. F2: transfer the F1 encoder, remove the decoder, add a gradient reversal
-   layer and one-dimensional PatchGAN, and learn the three BP patterns.
+   one of eleven PPG transformations. The disclosed amplitude negation is
+   multiplication by -1, hard clipping affects peaks and valleys, and temporal
+   scaling is implemented as global stretch/compression. Validation
+   corruptions are fixed across epochs.
+2. F2: transfer the F1 encoder, remove the decoder, globally average the
+   token/time axis to obtain the disclosed `1 x N` embedding vector, add a
+   gradient reversal layer and one-dimensional PatchGAN, and learn the three
+   BP patterns.
 3. F3: transfer the F2 encoder, apply global average pooling, and estimate SBP
    and DBP using MSE.
 4. Use Adam at 1e-3 with beta1=0.8 and beta2=0.999. The patent's translated
@@ -67,7 +84,8 @@ The following values are explicit configuration choices rather than claims
 about the authors' unreleased implementation: 512 resampled samples per window,
 128-dimensional embeddings, four encoder layers, two decoder layers, eight
 heads, 256 feed-forward features, the PatchGAN channel widths, 50/30/50 epochs,
-batch size 8, and the numeric severity ranges of transformations whose symbols
+batch size 8, the 30-minute MIMIC record cap, peak detector, within-window BP
+aggregation, and the numeric severity ranges of transformations whose symbols
 were defined but values were not published.
 
 The epoch values are maximum budgets. Every stage uses validation-based early
@@ -83,12 +101,17 @@ reproduction requires the authors' code, exact public subject list, private
 Run the complete public pipeline in a new output directory:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run_stp_faithful_public.ps1 -SkipDataPreparation -RunName stp_public_method_v2
+powershell -ExecutionPolicy Bypass -File scripts\run_stp_faithful_public.ps1 -RunName stp_public_method_v4 -ProcessedName stp_public_method_v4
 ```
 
 Outputs are written to `outputs/<RunName>/F1`, `F2`, and `F3`. A strict cohort
 audit is written to `outputs/<RunName>/data_audit.json` before training starts.
 The runner never points to the earlier STP checkpoints.
+
+The earlier F1 checkpoint remains preserved for comparison, but is not reused
+by v4 because its self-supervised cohort was selected with cycle-based rather
+than the disclosed fixed-length segmentation. Reusing it would make the new
+run internally inconsistent.
 
 ## Transfer-path ablation
 

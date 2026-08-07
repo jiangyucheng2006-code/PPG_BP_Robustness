@@ -215,6 +215,8 @@ class STPTransformBank:
         )
         phase = 2 * torch.pi * torch.rand(batch, device=x.device, generator=generator)
         drift = torch.sin(2 * torch.pi * frequency[:, None] * time + phase[:, None])
+        if self.paper_disclosed:
+            return x + drift * (0.03 + 0.22 * severity)[:, None] * self._range(x)[:, None]
         slope = (
             2 * torch.rand(batch, device=x.device, generator=generator) - 1
         )[:, None] * torch.linspace(-0.5, 0.5, samples, device=x.device)
@@ -344,12 +346,20 @@ class STPTransformBank:
         output = x.clone()
         for row in range(len(x)):
             fraction = 0.01 + 0.19 * float(severity[row])
+            lower = torch.quantile(x[row], fraction)
             upper = torch.quantile(x[row], 1 - fraction)
-            output[row] = x[row].clamp_max(upper)
+            output[row] = (
+                x[row].clamp(lower, upper)
+                if self.paper_disclosed
+                else x[row].clamp_max(upper)
+            )
         return output
 
     def _amplitude_negation(self, x, severity, generator):
         del severity, generator
+        if self.paper_disclosed:
+            # The disclosed amplitude scale factor is exactly -1.
+            return -x
         return x.amax(dim=1, keepdim=True) + x.amin(dim=1, keepdim=True) - x
 
     def _temporal_inversion(self, x, severity, generator):
@@ -371,6 +381,38 @@ class STPTransformBank:
 
     def _temporal_warping(self, x, severity, generator):
         batch, samples = x.shape
+        if self.paper_disclosed:
+            # The disclosed transform is a global random resampling by a
+            # scale factor beta (stretch/compress), rather than a local
+            # non-linear warp. Exact beta limits are not reported.
+            output = torch.empty_like(x)
+            direction = torch.where(
+                torch.rand(batch, device=x.device, generator=generator) < 0.5,
+                -1.0,
+                1.0,
+            )
+            factors = 1.0 + direction * (0.05 + 0.25 * severity)
+            for row in range(batch):
+                scaled_length = max(8, int(round(samples * float(factors[row]))))
+                scaled = F.interpolate(
+                    x[row : row + 1, None],
+                    size=scaled_length,
+                    mode="linear",
+                    align_corners=False,
+                )[0, 0]
+                if scaled_length >= samples:
+                    start = (scaled_length - samples) // 2
+                    output[row] = scaled[start : start + samples]
+                else:
+                    padding = samples - scaled_length
+                    left = padding // 2
+                    right = padding - left
+                    output[row] = F.pad(
+                        scaled[None, None],
+                        (left, right),
+                        mode="replicate",
+                    )[0, 0]
+            return output
         control_points = 6
         increments = 1 + (
             torch.rand(

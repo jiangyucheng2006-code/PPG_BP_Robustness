@@ -8,7 +8,7 @@ data:
   sources: [WESAD, PPGDaLiA]
   sampling_rate: 125
   window_cycles: 5
-  stride_cycles: 2
+  overlap_cycles: 2
 model:
   name: stp
   stage: pretrain

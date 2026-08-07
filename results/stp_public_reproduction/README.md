@@ -1,49 +1,50 @@
-# STP public-data reproduction
+# STP faithful public-data reproduction (v4)
 
-This run verifies the complete public-data S1-S3 training path:
+This run follows the public parts of the disclosed STP pipeline and keeps all
+unpublished choices explicitly provisional. The full pipeline completed in
+approximately 8 hours 20 minutes on an RTX 4060 Laptop GPU.
 
-1. transformed-PPG reconstruction using WESAD and PPG-DaLiA;
-2. three-class BP-pattern adaptation using MIMIC-III;
-3. SBP/DBP regression using MIMIC-III.
+## Audited data
 
-## Data
+| Source and role | Subjects | Windows |
+|---|---:|---:|
+| MIMIC-III, unpaired pretraining | 300 | 122,904 |
+| WESAD, unpaired pretraining | 15 | 20,800 |
+| PPG-DaLiA, unpaired pretraining | 15 | 31,175 |
+| MIMIC-III, paired BP training | 200 | 129,389 |
+| **Total** | **530** | **304,268** |
 
-| Source | Subjects / record groups | Windows | Role |
-|---|---:|---:|---|
-| WESAD | 15 | 44,249 | S1 |
-| PPG-DaLiA | 15 | 76,464 | S1 |
-| MIMIC-III | 403 | 454,367 | S2 and S3 |
+The strict audit passed. All arrays were finite and within their expected
+ranges, all required files were present, BP-pattern labels were consistent,
+and no subject crossed a data split or appeared in both paired and unpaired
+MIMIC roles. The paired cohort used a fixed subject-wise 140/30/30
+train/validation/test split.
 
-The MIMIC preparation attempted 500 public record groups. A total of 403
-produced valid paired PPG/ABP windows; the rest were unavailable, interrupted
-by the remote server, or failed signal-quality checks.
+## Held-out test results
 
-All splits are subject-wise. No window from a validation or test subject is
-used for training.
-
-## Results
-
-| Stage | Best epoch | Test result |
+| Stage | Best / completed epoch | Test result |
 |---|---:|---|
-| S1 reconstruction | 42 | MSE 0.0135; MAE 0.0724 |
-| S2 BP-pattern classification | 5 | accuracy 36.63%; macro recall 35.19% |
-| S3 BP regression | 8 | SBP MAE 23.13 mmHg; DBP MAE 12.65 mmHg |
+| F1 reconstruction | 20 / 28 | MSE 0.01487; MAE 0.07037 |
+| F2 BP-pattern adaptation | 1 / 9 | accuracy 49.91%; macro recall 33.33% |
+| F3 BP regression | 8 / 16 | SBP MAE 22.63; DBP MAE 11.66; mean MAE 17.15 mmHg |
 
-The final mean MAE is 17.89 mmHg. SBP and DBP both receive BHS grade D and do
-not meet the numerical AAMI error criteria.
+F2 collapsed to the majority class: every one of the 20,622 test windows was
+predicted as class 0. Consequently, its apparent accuracy does not indicate
+useful three-class discrimination.
+
+For F3, SBP RMSE was 27.64 mmHg and DBP RMSE was 15.09 mmHg. Both outputs
+received BHS grade D and failed the numerical AAMI error checks. In addition,
+the 30-subject public test split and its BP distribution are insufficient for
+a formal AAMI evaluation.
 
 ## Interpretation
 
-The run confirms that data preparation, sequential encoder transfer, training,
-early stopping, and held-out evaluation work end to end. It does **not**
-reproduce the paper's reported numerical result. The main observed limitation
-is weak S2 pattern separation, followed by large subject-independent S3 error.
+The result verifies that the audited public-only F1-to-F2-to-F3 implementation
+runs end to end, but it does not reproduce the article's reported performance.
+Compared with the earlier v2 attempt, mean MAE improved from 18.03 to 17.15
+mmHg, while the F2 collapse remained. The unavailable 683-subject private
+cohort, exact MIMIC record list, and undisclosed architecture and training
+details prevent a claim of exact numerical reproduction.
 
-This is a public-only reproduction. The original private Mindray cohort,
-exact record list, and unpublished training details are unavailable. The
-result is therefore used as a transparent baseline for subsequent
-optimization, not as a claim of exact paper reproduction.
-
-Model checkpoints remain local because generated weights and datasets are
-excluded from Git. The machine-readable metrics are in
-[`summary.json`](summary.json).
+Generated datasets and model checkpoints remain local. Machine-readable
+results are provided in [`summary.json`](summary.json).

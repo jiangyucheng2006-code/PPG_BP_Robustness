@@ -1,54 +1,88 @@
 {
-  "experiment": "STP public-data reproduction",
-  "data": {
-    "WESAD": {
-      "subjects": 15,
-      "windows": 44249
+  "experiment": "STP faithful public-data reproduction v4",
+  "runtime_hours": 8.33,
+  "data_audit": {
+    "strict_public_cohort_pass": true,
+    "subjects": 530,
+    "windows": 304268,
+    "missing_files": 0,
+    "protocol_issues": 0,
+    "array_issues": 0,
+    "cross_split_subject_overlap": 0,
+    "mimic_cross_role_subject_overlap": 0,
+    "sources": {
+      "MIMICIII_pretrain_unpaired": {
+        "subjects": 300,
+        "windows": 122904
+      },
+      "WESAD_pretrain_unpaired": {
+        "subjects": 15,
+        "windows": 20800
+      },
+      "PPGDaLiA_pretrain_unpaired": {
+        "subjects": 15,
+        "windows": 31175
+      },
+      "MIMICIII_supervised_paired": {
+        "subjects": 200,
+        "windows": 129389
+      }
     },
-    "PPGDaLiA": {
-      "subjects": 15,
-      "windows": 76464
+    "paired_subject_split": {
+      "train": 140,
+      "validation": 30,
+      "test": 30
     },
-    "MIMICIII": {
-      "attempted_record_groups": 500,
-      "valid_record_groups": 403,
-      "windows": 454367
-    }
+    "paired_test_distribution_pass": false
   },
   "stages": {
-    "S1": {
-      "best_epoch": 42,
-      "completed_epochs": 50,
-      "test_reconstruction_mse": 0.01352355948253236,
-      "test_reconstruction_mae": 0.07238850061399801
+    "F1": {
+      "best_epoch": 20,
+      "completed_epochs": 28,
+      "test_reconstruction_mse": 0.014866068102432682,
+      "test_reconstruction_mae": 0.07037393070801005
     },
-    "S2": {
-      "best_epoch": 5,
-      "completed_epochs": 11,
-      "test_pattern_accuracy": 0.3663419549882432,
-      "test_pattern_macro_recall": 0.35189712047576904
+    "F2": {
+      "best_epoch": 1,
+      "completed_epochs": 9,
+      "test_pattern_loss": 1.0267232263970358,
+      "test_pattern_accuracy": 0.4990786538648046,
+      "test_pattern_macro_recall": 0.3333333432674408,
+      "test_confusion_matrix": [
+        [10292, 0, 0],
+        [3465, 0, 0],
+        [6865, 0, 0]
+      ],
+      "majority_class_collapse": true
     },
-    "S3": {
+    "F3": {
       "best_epoch": 8,
       "completed_epochs": 16,
-      "test_sbp_mae": 23.13095918116571,
-      "test_sbp_rmse": 30.411182741869048,
-      "test_sbp_bias": 4.45720961130262,
-      "test_sbp_error_std": 30.082976547171178,
-      "test_dbp_mae": 12.648025283300921,
-      "test_dbp_rmse": 17.144091199538522,
-      "test_dbp_bias": 0.8645831778836722,
-      "test_dbp_error_std": 17.122391719750933,
-      "test_mean_mae": 17.889492232233316,
+      "test_sbp_mae": 22.626155738952654,
+      "test_sbp_rmse": 27.639240628301938,
+      "test_sbp_bias": -3.172038552879235,
+      "test_sbp_error_std": 27.457282314298478,
+      "test_dbp_mae": 11.66469826428692,
+      "test_dbp_rmse": 15.092228362361869,
+      "test_dbp_bias": -0.7027134630338099,
+      "test_dbp_error_std": 15.076225408890394,
+      "test_mean_mae": 17.145427001619787,
       "sbp_bhs_grade": "D",
       "dbp_bhs_grade": "D",
       "sbp_aami_numerical_pass": false,
       "dbp_aami_numerical_pass": false
     }
   },
+  "comparison_to_v2": {
+    "v2_test_sbp_mae": 23.5700598988719,
+    "v2_test_dbp_mae": 12.497588011909732,
+    "v2_test_mean_mae": 18.033823955390815,
+    "v4_mean_mae_improvement": 0.888396953771028
+  },
   "reproduction_scope": {
     "public_only": true,
-    "private_mindray_included": false,
+    "private_683_subject_cohort_included": false,
+    "exact_public_record_list_available": false,
     "exact_paper_hyperparameters_available": false,
     "claim_exact_numerical_reproduction": false
   }

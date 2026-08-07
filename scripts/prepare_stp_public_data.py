@@ -1,9 +1,9 @@
 """Prepare the public-data portion of the STP experiment.
 
 The original study combines WESAD and PPG-DaLiA as unpaired PPG sources with
-paired PPG/ABP records.  This script prepares those sources using the
-paper-confirmed five-cycle window and two-cycle stride.  The private Mindray
-cohort is intentionally not required.
+paired PPG/ABP records. Self-supervised sources use fixed-length windows;
+paired records use the disclosed five-cycle windows with two-cycle overlap.
+The private Mindray cohort is intentionally not required.
 """
 
 from __future__ import annotations
@@ -28,7 +28,9 @@ from ppg_bp.data.stp import (
     bp_pattern_labels,
     cycle_windows,
     filter_abp_fir,
+    fixed_length_windows,
     is_flatline,
+    normalize_ppg,
     resample_to_125hz,
     template_quality_mask,
     wavelet_filter_ppg,
@@ -175,6 +177,20 @@ def read_bvp_pickle(path: Path) -> np.ndarray:
     return np.asarray(bvp, dtype=np.float32).reshape(-1)
 
 
+def save_entry_checkpoint(output: Path, entry: dict) -> None:
+    """Atomically persist one self-describing prepared-subject entry."""
+
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(entry["subject_id"]))
+    checkpoint_directory = (
+        output / "entry_checkpoints" / str(entry["source"]).lower()
+    )
+    checkpoint_directory.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = checkpoint_directory / f"{safe_id}.json"
+    temporary = checkpoint_path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(entry, indent=2), encoding="utf-8")
+    temporary.replace(checkpoint_path)
+
+
 def save_subject(
     output: Path,
     *,
@@ -212,6 +228,10 @@ def save_subject(
         pattern_relative = relative_directory / f"{safe_id}_patterns.npy"
         np.save(output / pattern_relative, patterns.astype(np.int64, copy=False))
         entry["patterns"] = pattern_relative.as_posix()
+    # Keep one small, self-describing checkpoint per subject. This makes a
+    # multi-hour remote preparation resumable without guessing roles from
+    # array filenames when the final manifest has not yet been written.
+    save_entry_checkpoint(output, entry)
     return entry
 
 
@@ -240,15 +260,36 @@ def prepare_unpaired_source(
     ):
         match = re.fullmatch(r"S(\d+)", path.stem)
         assert match is not None
-        resampled = resample_to_125hz(read_bvp_pickle(path), 64.0)
-        windows, _ = cycle_windows(
-            resampled,
-            125.0,
-            cycles=5,
-            stride_cycles=2,
-            output_samples=output_samples,
-            filter_method="stp_db8",
+        raw_bvp = read_bvp_pickle(path)
+        finite = np.isfinite(raw_bvp)
+        if finite.sum() < 10 * 64.0:
+            continue
+        filtered = wavelet_filter_ppg(resample_to_125hz(raw_bvp, 64.0))
+        validity_positions = np.linspace(0, len(finite) - 1, len(filtered))
+        resampled_finite = np.interp(
+            validity_positions,
+            np.arange(len(finite)),
+            finite.astype(np.float32),
+        ) >= 0.999
+        windows, bounds = fixed_length_windows(
+            filtered,
+            window_samples=output_samples,
+            normalize_windows=False,
         )
+        not_flat = np.asarray(
+            [not is_flatline(filtered[start:stop]) for start, stop in bounds],
+            dtype=bool,
+        )
+        complete = np.asarray(
+            [bool(np.all(resampled_finite[start:stop])) for start, stop in bounds],
+            dtype=bool,
+        )
+        windows = windows[not_flat & complete]
+        template_valid, template_statistics = template_quality_mask(windows)
+        windows = windows[template_valid]
+        if not len(windows):
+            continue
+        windows = np.stack([normalize_ppg(window) for window in windows])
         if maximum_windows_per_subject is not None:
             windows = windows[:maximum_windows_per_subject]
         if not len(windows):
@@ -267,6 +308,15 @@ def prepare_unpaired_source(
                     "ppg_filter": "db8 level 9; cA9 and cD3-cD1 zeroed",
                     "paired_bp": False,
                     "source_file": str(path),
+                    "segmentation": "fixed_length",
+                    "window_samples": output_samples,
+                    "processing_protocol_version": 4,
+                    "quality_filter": {
+                        "flatline_first_difference": True,
+                        "missing_sample_windows_rejected": True,
+                        "template_rule": "mean difference/correlation 3 sigma before normalization",
+                        **template_statistics,
+                    },
                 },
             )
         )
@@ -290,9 +340,8 @@ def estimate_phase_lag(
     sampling_rate: float,
     maximum_delay_seconds: float = 0.5,
 ) -> int:
-    limit = min(len(ppg), int(60 * sampling_rate))
-    first = ppg[:limit]
-    second = abp[:limit]
+    first = np.asarray(ppg)
+    second = np.asarray(abp)
     first = (first - np.mean(first)) / max(float(np.std(first)), 1e-6)
     second = (second - np.mean(second)) / max(float(np.std(second)), 1e-6)
     values = correlate(first, second, mode="full", method="fft")
@@ -333,10 +382,17 @@ def apply_phase_lag(
 def bp_from_abp_window(
     abp: np.ndarray,
     sampling_rate: float,
+    *,
+    detection_signal: np.ndarray | None = None,
 ) -> tuple[float, float]:
+    """Read calibrated BP values at peaks/troughs detected after filtering."""
+
+    detection = abp if detection_signal is None else detection_signal
+    if len(detection) != len(abp):
+        raise ValueError("ABP detection and calibrated signals must align")
     distance = max(1, int(0.35 * sampling_rate))
-    systolic_indices, _ = find_peaks(abp, distance=distance)
-    diastolic_indices, _ = find_peaks(-abp, distance=distance)
+    systolic_indices, _ = find_peaks(detection, distance=distance)
+    diastolic_indices, _ = find_peaks(-detection, distance=distance)
     if len(systolic_indices) >= 3 and len(diastolic_indices) >= 3:
         sbp = float(np.median(abp[systolic_indices]))
         dbp = float(np.median(abp[diastolic_indices]))
@@ -501,11 +557,15 @@ def recover_prepared_entries(
     seed: int,
     maximum_subjects: int | None = None,
 ) -> list[dict]:
-    """Recover completed arrays after an interrupted preparation run."""
+    """Recover only entries whose v4 manifest preserves their exact role."""
+
+    del seed
 
     manifest_path = output / "manifest.json"
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if int(manifest.get("format_version", 0)) < 4:
+            return []
         matching = [
             entry
             for entry in manifest.get("subjects", ())
@@ -530,46 +590,87 @@ def recover_prepared_entries(
         ]
         if len(complete) == len(matching) and complete:
             return complete
+    checkpoint_directory = output / "entry_checkpoints" / source.lower()
+    checkpoint_entries: list[dict] = []
+    if checkpoint_directory.exists():
+        for checkpoint_path in sorted(checkpoint_directory.glob("*.json")):
+            try:
+                entry = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if entry.get("source") != source or entry.get("role") != role:
+                continue
+            if int(entry.get("metadata", {}).get("processing_protocol_version", 0)) < 4:
+                continue
+            if not entry.get("signals") or not (output / entry["signals"]).exists():
+                continue
+            if entry.get("labels") and not (output / entry["labels"]).exists():
+                continue
+            if entry.get("patterns") and not (output / entry["patterns"]).exists():
+                continue
+            checkpoint_entries.append(entry)
+        checkpoint_entries.sort(key=lambda entry: str(entry.get("subject_id", "")))
+        if maximum_subjects is not None:
+            checkpoint_entries = checkpoint_entries[:maximum_subjects]
+        if checkpoint_entries:
+            return checkpoint_entries
+    # Bare arrays without a manifest or self-describing checkpoint cannot be
+    # assigned safely to paired versus unpaired roles. Rebuild those arrays.
+    return []
 
-    directory = output / "subjects" / source.lower()
-    signal_files = sorted(directory.glob("*_signals.npy"))
-    if maximum_subjects is not None:
-        signal_files = signal_files[:maximum_subjects]
-    subject_ids = [
-        path.name.removesuffix("_signals.npy") for path in signal_files
+
+def load_record_cache(
+    path: Path,
+    *,
+    require_abp: bool,
+    minimum_records: int,
+    excluded_subjects: set[str] | None = None,
+) -> list[tuple[str, str | None]]:
+    """Load a protocol-v4 discovery cache if it still satisfies the role."""
+
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if (
+        int(payload.get("processing_protocol_version", 0)) < 4
+        or bool(payload.get("require_abp")) != require_abp
+    ):
+        return []
+    records = [
+        (str(item["record"]), item.get("pn_dir"))
+        for item in payload.get("records", ())
+        if item.get("record")
     ]
-    split_map = balanced_subject_splits(subject_ids, seed)
-    entries: list[dict] = []
-    for signal_path, subject_id in zip(signal_files, subject_ids):
-        relative_directory = Path("subjects") / source.lower()
-        label_path = directory / f"{subject_id}_labels.npy"
-        pattern_path = directory / f"{subject_id}_patterns.npy"
-        signals = np.load(signal_path, mmap_mode="r")
-        entries.append(
-            {
-                "subject_id": subject_id,
-                "source": source,
-                "split": split_map[subject_id],
-                "role": role,
-                "windows": int(len(signals)),
-                "signals": (relative_directory / signal_path.name).as_posix(),
-                "labels": (
-                    (relative_directory / label_path.name).as_posix()
-                    if label_path.exists()
-                    else None
-                ),
-                "patterns": (
-                    (relative_directory / pattern_path.name).as_posix()
-                    if pattern_path.exists()
-                    else None
-                ),
-                "metadata": {
-                    "recovered_after_interrupted_run": True,
-                    "processing_protocol": "STP disclosed public preprocessing",
-                },
-            }
-        )
-    return entries
+    excluded_subjects = excluded_subjects or set()
+    if any(
+        subject_from_record(record_pn_dir or record) in excluded_subjects
+        for record, record_pn_dir in records
+    ):
+        return []
+    return records if len(records) >= minimum_records else []
+
+
+def save_record_cache(
+    path: Path,
+    records: list[tuple[str, str | None]],
+    *,
+    require_abp: bool,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "processing_protocol_version": 4,
+        "require_abp": require_abp,
+        "records": [
+            {"record": record, "pn_dir": record_pn_dir}
+            for record, record_pn_dir in records
+        ],
+    }
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 def local_mimic_records(
@@ -632,12 +733,17 @@ def prepare_mimic(
     maximum_subjects: int | None = None,
 ) -> list[dict]:
     entries: list[dict] = []
-    subject_ids = [
-        f"MIMICIII_{Path(record).name.split('_', 1)[0]}"
-        for record, _ in records
+    canonical_subject_ids = [
+        subject_from_record(record_pn_dir or record)
+        for record, record_pn_dir in records
     ]
+    subject_ids = [f"MIMICIII_{subject}" for subject in canonical_subject_ids]
     split_map = balanced_subject_splits(subject_ids, seed)
-    for record, record_pn_dir in tqdm(records, desc="Preparing MIMIC-III"):
+    for (record, record_pn_dir), canonical_subject_id, subject_id in tqdm(
+        zip(records, canonical_subject_ids, subject_ids),
+        total=len(records),
+        desc="Preparing MIMIC-III",
+    ):
         try:
             header = wfdb.rdheader(record, pn_dir=record_pn_dir)
             names = list(header.sig_name)
@@ -662,21 +768,41 @@ def prepare_mimic(
             continue
         if data is None:
             continue
-        finite = np.isfinite(data).all(axis=1)
-        if finite.sum() < 10 * sampling_rate:
+        ppg_finite = np.isfinite(data[:, 0])
+        abp_finite = np.isfinite(data[:, 1])
+        if (
+            ppg_finite.sum() < 10 * sampling_rate
+            or abp_finite.sum() < 10 * sampling_rate
+        ):
             continue
+        original_samples = np.arange(len(data))
         ppg = np.interp(
-            np.arange(len(data)),
-            np.flatnonzero(finite),
-            data[finite, 0],
+            original_samples,
+            np.flatnonzero(ppg_finite),
+            data[ppg_finite, 0],
         ).astype(np.float32)
         abp = np.interp(
-            np.arange(len(data)),
-            np.flatnonzero(finite),
-            data[finite, 1],
+            original_samples,
+            np.flatnonzero(abp_finite),
+            data[abp_finite, 1],
         ).astype(np.float32)
         ppg = wavelet_filter_ppg(resample_to_125hz(ppg, sampling_rate))
         abp_reference = resample_to_125hz(abp, sampling_rate)
+        validity_positions = np.linspace(
+            0,
+            len(ppg_finite) - 1,
+            len(abp_reference),
+        )
+        resampled_ppg_finite = np.interp(
+            validity_positions,
+            original_samples,
+            ppg_finite.astype(np.float32),
+        ) >= 0.999
+        resampled_abp_finite = np.interp(
+            validity_positions,
+            original_samples,
+            abp_finite.astype(np.float32),
+        ) >= 0.999
         abp_filtered = filter_abp_fir(abp_reference, 125.0)
         sampling_rate = 125.0
         lag = estimate_phase_lag(
@@ -684,24 +810,51 @@ def prepare_mimic(
             abp_filtered,
             sampling_rate,
         )
-        ppg, aligned_abp = apply_phase_lag(ppg, abp_reference, lag)
+        unaligned_ppg = ppg
+        ppg, aligned_abp = apply_phase_lag(
+            unaligned_ppg,
+            abp_reference,
+            lag,
+        )
+        _, aligned_abp_filtered = apply_phase_lag(
+            unaligned_ppg,
+            abp_filtered,
+            lag,
+        )
+        aligned_ppg_finite, aligned_abp_finite = apply_phase_lag(
+            resampled_ppg_finite,
+            resampled_abp_finite,
+            lag,
+        )
+        aligned_finite = aligned_ppg_finite & aligned_abp_finite
         windows, bounds = cycle_windows(
             ppg,
             sampling_rate,
             cycles=5,
-            stride_cycles=2,
+            overlap_cycles=2,
             output_samples=output_samples,
             filter_method="none",
+            normalize_windows=False,
         )
+        if not len(bounds):
+            continue
         labels = np.asarray(
             [
-                bp_from_abp_window(aligned_abp[start:stop], sampling_rate)
+                bp_from_abp_window(
+                    aligned_abp[start:stop],
+                    sampling_rate,
+                    detection_signal=aligned_abp_filtered[start:stop],
+                )
                 for start, stop in bounds
             ],
             dtype=np.float32,
-        )
+        ).reshape(-1, 2)
         not_flat = np.asarray(
             [not is_flatline(ppg[start:stop]) for start, stop in bounds],
+            dtype=bool,
+        )
+        complete = np.asarray(
+            [bool(np.all(aligned_finite[start:stop])) for start, stop in bounds],
             dtype=bool,
         )
         valid = (
@@ -709,19 +862,21 @@ def prepare_mimic(
             & (labels[:, 1] >= 25)
             & (labels[:, 0] > labels[:, 1])
             & not_flat
+            & complete
         )
         windows = windows[valid]
         labels = labels[valid]
         template_valid, template_statistics = template_quality_mask(windows)
         windows = windows[template_valid]
         labels = labels[template_valid]
+        if not len(windows):
+            continue
+        windows = np.stack([normalize_ppg(window) for window in windows])
         if maximum_windows_per_subject is not None:
             windows = windows[:maximum_windows_per_subject]
             labels = labels[:maximum_windows_per_subject]
         if not len(windows):
             continue
-        mimic_group = Path(record).name.split("_", 1)[0]
-        subject_id = f"MIMICIII_{mimic_group}"
         entries.append(
             save_subject(
                 output,
@@ -738,14 +893,18 @@ def prepare_mimic(
                     "paired_bp": True,
                     "record": record,
                     "pn_dir": record_pn_dir,
+                    "canonical_subject_id": canonical_subject_id,
                     "phase_lag_samples": lag,
                     "maximum_alignment_delay_ms": 500,
                     "ppg_filter": "db8 level 9; cA9 and cD3-cD1 zeroed",
-                    "abp_filter": "FIR 0.5-35 Hz for phase alignment; calibrated ABP retained for labels",
+                    "abp_filter": "FIR 0.5-35 Hz for phase alignment; calibrated ABP retained for absolute labels",
+                    "segmentation": "five_cycles_two_cycle_overlap",
+                    "processing_protocol_version": 4,
                     "quality_filter": {
                         "flatline_first_difference": True,
+                        "missing_sample_windows_rejected": True,
                         "minimum_dbp_mmHg": 25,
-                        "template_rule": "mean difference/correlation 3 sigma",
+                        "template_rule": "mean difference/correlation 3 sigma before normalization",
                         **template_statistics,
                         "candidate_windows": int(len(valid)),
                         "retained_windows": int(len(windows)),
@@ -761,6 +920,7 @@ def prepare_mimic(
     )
     for entry in entries:
         entry["split"] = retained_split_map[entry["subject_id"]]
+        save_entry_checkpoint(output, entry)
     return entries
 
 
@@ -776,14 +936,17 @@ def prepare_mimic_unpaired(
 ) -> list[dict]:
     """Prepare MIMIC PPG records whose invasive BP channel is missing."""
 
+    canonical_subject_ids = [
+        subject_from_record(record_pn_dir or record)
+        for record, record_pn_dir in records
+    ]
     subject_ids = [
-        f"MIMICIII_UNPAIRED_{subject_from_record(record)}"
-        for record, _ in records
+        f"MIMICIII_UNPAIRED_{subject}" for subject in canonical_subject_ids
     ]
     split_map = balanced_subject_splits(subject_ids, seed)
     entries: list[dict] = []
-    for (record, record_pn_dir), subject_id in tqdm(
-        zip(records, subject_ids),
+    for (record, record_pn_dir), canonical_subject_id, subject_id in tqdm(
+        zip(records, canonical_subject_ids, subject_ids),
         total=len(records),
         desc="Preparing unpaired MIMIC-III",
     ):
@@ -810,23 +973,41 @@ def prepare_mimic_unpaired(
             continue
         if record_data is None:
             continue
+        raw_ppg = np.asarray(record_data[:, 0])
+        finite = np.isfinite(raw_ppg)
+        if finite.sum() < 10 * sampling_rate:
+            continue
         try:
             ppg = wavelet_filter_ppg(
-                resample_to_125hz(record_data[:, 0], sampling_rate)
+                resample_to_125hz(raw_ppg, sampling_rate)
             )
         except ValueError:
             continue
-        windows, _ = cycle_windows(
+        validity_positions = np.linspace(0, len(finite) - 1, len(ppg))
+        resampled_finite = np.interp(
+            validity_positions,
+            np.arange(len(finite)),
+            finite.astype(np.float32),
+        ) >= 0.999
+        windows, bounds = fixed_length_windows(
             ppg,
-            125.0,
-            cycles=5,
-            stride_cycles=2,
-            output_samples=output_samples,
-            filter_method="none",
+            window_samples=output_samples,
+            normalize_windows=False,
         )
+        not_flat = np.asarray(
+            [not is_flatline(ppg[start:stop]) for start, stop in bounds],
+            dtype=bool,
+        )
+        complete = np.asarray(
+            [bool(np.all(resampled_finite[start:stop])) for start, stop in bounds],
+            dtype=bool,
+        )
+        windows = windows[not_flat & complete]
         if len(windows):
             template_valid, template_statistics = template_quality_mask(windows)
             windows = windows[template_valid]
+            if len(windows):
+                windows = np.stack([normalize_ppg(window) for window in windows])
         else:
             template_statistics = {}
         if maximum_windows_per_subject is not None:
@@ -847,9 +1028,15 @@ def prepare_mimic_unpaired(
                     "paired_bp": False,
                     "record": record,
                     "pn_dir": record_pn_dir,
+                    "canonical_subject_id": canonical_subject_id,
                     "ppg_filter": "db8 level 9; cA9 and cD3-cD1 zeroed",
+                    "segmentation": "fixed_length",
+                    "window_samples": output_samples,
+                    "processing_protocol_version": 4,
                     "quality_filter": {
-                        "template_rule": "mean difference/correlation 3 sigma",
+                        "flatline_first_difference": True,
+                        "missing_sample_windows_rejected": True,
+                        "template_rule": "mean difference/correlation 3 sigma before normalization",
                         **template_statistics,
                     },
                 },
@@ -863,6 +1050,7 @@ def prepare_mimic_unpaired(
     )
     for entry in entries:
         entry["split"] = retained_split_map[entry["subject_id"]]
+        save_entry_checkpoint(output, entry)
     return entries
 
 
@@ -1014,6 +1202,7 @@ def main() -> None:
             args.mimic_max_subjects,
             2 * args.mimic_max_subjects,
         )
+        paired_cache = output / "record_indexes" / "mimic_paired.json"
         if args.mimic_record_list:
             records = [
                 (
@@ -1029,11 +1218,18 @@ def main() -> None:
                 candidate_subjects,
             )
         elif args.discover_mimic_records:
-            records = public_mimic_records(
-                args.mimic_discovery_pn_dir,
-                candidate_subjects,
-                args.mimic_index_workers,
+            records = load_record_cache(
+                paired_cache,
+                require_abp=True,
+                minimum_records=candidate_subjects,
             )
+            if not records:
+                records = public_mimic_records(
+                    args.mimic_discovery_pn_dir,
+                    candidate_subjects,
+                    args.mimic_index_workers,
+                )
+                save_record_cache(paired_cache, records, require_abp=True)
         else:
             index_path = (
                 args.mimic_record_index
@@ -1048,42 +1244,106 @@ def main() -> None:
                 maximum_subjects=candidate_subjects,
                 seed=args.seed,
             )
-        paired_entries = (
-            recovered_paired
-            if len(recovered_paired) == args.mimic_max_subjects
-            else prepare_mimic(
+        if len(recovered_paired) == args.mimic_max_subjects:
+            paired_entries = recovered_paired
+        else:
+            recovered_subjects = {
+                str(entry.get("metadata", {}).get("canonical_subject_id", ""))
+                for entry in recovered_paired
+            }
+            remaining_records = [
+                (record, record_pn_dir)
+                for record, record_pn_dir in records
+                if subject_from_record(record_pn_dir or record)
+                not in recovered_subjects
+            ]
+            new_paired = prepare_mimic(
                 output,
-                records=records,
+                records=remaining_records,
                 seed=args.seed,
                 output_samples=args.window_samples,
                 minutes_per_record=args.mimic_minutes_per_record,
                 maximum_windows_per_subject=args.maximum_windows_per_subject,
-                maximum_subjects=args.mimic_max_subjects,
+                maximum_subjects=args.mimic_max_subjects - len(recovered_paired),
             )
-        )
+            paired_entries = recovered_paired + new_paired
+            retained_split_map = balanced_subject_splits(
+                [entry["subject_id"] for entry in paired_entries],
+                args.seed,
+            )
+            for entry in paired_entries:
+                entry["split"] = retained_split_map[entry["subject_id"]]
+                save_entry_checkpoint(output, entry)
         entries.extend(paired_entries)
         if args.discover_mimic_unpaired:
             paired_subjects = {
-                subject_from_record(record) for record, _ in records
+                str(entry.get("metadata", {}).get("canonical_subject_id", ""))
+                for entry in paired_entries
             }
-            unpaired_records = public_mimic_records(
-                args.mimic_unpaired_pn_dir,
-                2 * args.mimic_unpaired_subjects,
-                args.mimic_index_workers,
-                require_abp=False,
-                excluded_subjects=paired_subjects,
-            )
-            entries.extend(
-                prepare_mimic_unpaired(
+            recovered_unpaired = (
+                recover_prepared_entries(
                     output,
-                    records=unpaired_records,
+                    source="MIMICIII",
+                    role="pretrain_unpaired",
+                    seed=args.seed,
+                    maximum_subjects=args.mimic_unpaired_subjects,
+                )
+                if args.reuse_prepared
+                else []
+            )
+            unpaired_cache = output / "record_indexes" / "mimic_unpaired.json"
+            if len(recovered_unpaired) == args.mimic_unpaired_subjects:
+                unpaired_entries = recovered_unpaired
+            else:
+                unpaired_records = load_record_cache(
+                    unpaired_cache,
+                    require_abp=False,
+                    minimum_records=2 * args.mimic_unpaired_subjects,
+                    excluded_subjects=paired_subjects,
+                )
+                if not unpaired_records:
+                    unpaired_records = public_mimic_records(
+                        args.mimic_unpaired_pn_dir,
+                        2 * args.mimic_unpaired_subjects,
+                        args.mimic_index_workers,
+                        require_abp=False,
+                        excluded_subjects=paired_subjects,
+                    )
+                    save_record_cache(
+                        unpaired_cache,
+                        unpaired_records,
+                        require_abp=False,
+                    )
+                recovered_unpaired_subjects = {
+                    str(entry.get("metadata", {}).get("canonical_subject_id", ""))
+                    for entry in recovered_unpaired
+                }
+                remaining_unpaired_records = [
+                    (record, record_pn_dir)
+                    for record, record_pn_dir in unpaired_records
+                    if subject_from_record(record_pn_dir or record)
+                    not in recovered_unpaired_subjects
+                ]
+                new_unpaired = prepare_mimic_unpaired(
+                    output,
+                    records=remaining_unpaired_records,
                     seed=args.seed,
                     output_samples=args.window_samples,
                     minutes_per_record=args.mimic_minutes_per_record,
                     maximum_windows_per_subject=args.maximum_windows_per_subject,
-                    maximum_subjects=args.mimic_unpaired_subjects,
+                    maximum_subjects=(
+                        args.mimic_unpaired_subjects - len(recovered_unpaired)
+                    ),
                 )
-            )
+                unpaired_entries = recovered_unpaired + new_unpaired
+                retained_split_map = balanced_subject_splits(
+                    [entry["subject_id"] for entry in unpaired_entries],
+                    args.seed,
+                )
+                for entry in unpaired_entries:
+                    entry["split"] = retained_split_map[entry["subject_id"]]
+                    save_entry_checkpoint(output, entry)
+            entries.extend(unpaired_entries)
 
     manifest_path = output / "manifest.json"
     if manifest_path.exists():
@@ -1103,15 +1363,18 @@ def main() -> None:
             key=lambda entry: (entry["source"], entry["subject_id"]),
         )
     manifest = {
-        "format_version": 2,
+        "format_version": 4,
         "method": "STP public-data faithful reproduction",
         "target_sampling_rate": 125,
         "ppg_filter": "db8 level 9; cA9 and cD3-cD1 zeroed",
         "abp_filter": "FIR 0.5-35 Hz",
         "quality_screening": "flatline, DBP >=25, average-template 3 sigma",
-        "window_cycles": 5,
-        "stride_cycles": 2,
+        "pretrain_segmentation": "fixed_length",
+        "pretrain_window_samples": args.window_samples,
+        "paired_window_cycles": 5,
+        "paired_overlap_cycles": 2,
         "window_samples": args.window_samples,
+        "normalization_order": "quality screening then per-window [0,1] scaling",
         "split_seed": args.seed,
         "split_protocol": "subject-wise 70/15/15",
         "subjects": entries,

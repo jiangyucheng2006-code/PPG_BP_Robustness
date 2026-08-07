@@ -10,6 +10,7 @@ from ppg_bp.data import (
     bp_pattern_labels,
     cycle_windows,
     filter_abp_fir,
+    fixed_length_windows,
     template_quality_mask,
     wavelet_filter_ppg,
 )
@@ -21,6 +22,7 @@ from ppg_bp.models import (
     STPTokenPool,
     transfer_encoder,
 )
+from ppg_bp.models.stp import GradientReversal
 
 
 def small_encoder() -> STPEncoder:
@@ -94,6 +96,45 @@ def test_all_paper_stp_transformations_reconstruct_original_target() -> None:
         assert torch.all(indices == STP_RECONSTRUCTION_TRANSFORMS.index(name))
 
 
+def test_disclosed_transform_definitions() -> None:
+    inputs = torch.linspace(0, 1, 128)[None, None]
+    transforms = STPTransformBank(
+        sampling_rate=125,
+        paper_disclosed=True,
+    )
+    negated, _, _ = transforms(
+        inputs,
+        forced_transform="amplitude_negation",
+        forced_severity=0.7,
+        seed=42,
+    )
+    assert torch.equal(negated, -inputs)
+
+    clipped, _, _ = transforms(
+        inputs,
+        forced_transform="hard_clipping",
+        forced_severity=0.7,
+        seed=42,
+    )
+    assert clipped.min() > inputs.min()
+    assert clipped.max() < inputs.max()
+
+    first, _, _ = transforms(
+        inputs,
+        forced_transform="temporal_warping",
+        forced_severity=0.7,
+        seed=42,
+    )
+    second, _, _ = transforms(
+        inputs,
+        forced_transform="temporal_warping",
+        forced_severity=0.7,
+        seed=42,
+    )
+    assert first.shape == inputs.shape
+    assert torch.equal(first, second)
+
+
 def test_five_cycle_window_and_bp_patterns() -> None:
     sampling_rate = 100
     time = np.arange(20 * sampling_rate) / sampling_rate
@@ -102,12 +143,13 @@ def test_five_cycle_window_and_bp_patterns() -> None:
         signal,
         sampling_rate,
         cycles=5,
-        stride_cycles=2,
+        overlap_cycles=2,
         output_samples=128,
     )
     assert len(windows) > 2
     assert windows.shape[1] == 128
     assert bounds.shape == (len(windows), 2)
+    assert bounds[1, 0] - bounds[0, 0] > 2 * sampling_rate
     labels = np.asarray([[85, 55], [120, 75], [145, 95]], dtype=np.float32)
     assert bp_pattern_labels(labels).tolist() == [0, 1, 2]
     threshold_labels = np.asarray(
@@ -115,6 +157,15 @@ def test_five_cycle_window_and_bp_patterns() -> None:
         dtype=np.float32,
     )
     assert bp_pattern_labels(threshold_labels).tolist() == [1, 1, 2, 2]
+
+
+def test_stp_fixed_length_windows() -> None:
+    signal = np.linspace(-2, 3, 25, dtype=np.float32)
+    windows, bounds = fixed_length_windows(signal, window_samples=10)
+    assert windows.shape == (2, 10)
+    assert bounds.tolist() == [[0, 10], [10, 20]]
+    assert np.allclose(windows.min(axis=1), 0)
+    assert np.allclose(windows.max(axis=1), 1)
 
 
 def test_stp_disclosed_filters_and_template_screening() -> None:
@@ -144,10 +195,22 @@ def test_stp_patchgan_pattern_adapter() -> None:
         gradient_reversal_strength=1.0,
     )
     inputs = torch.randn(2, 1, 128)
+    discriminator_inputs = []
+    hook = model.pattern_discriminator.register_forward_pre_hook(
+        lambda _module, arguments: discriminator_inputs.append(arguments[0].shape)
+    )
     logits, patch_logits = model(inputs, return_patch_logits=True)
+    hook.remove()
     assert logits.shape == (2, 3)
     assert patch_logits.shape[:2] == (2, 3)
-    assert patch_logits.shape[-1] == small_encoder().token_count
+    assert patch_logits.shape[-1] == small_encoder().embedding_dim
+    assert discriminator_inputs == [torch.Size((2, small_encoder().embedding_dim))]
+
+
+def test_stp_gradient_reversal_matches_minmax_direction() -> None:
+    inputs = torch.tensor([1.0, -2.0], requires_grad=True)
+    GradientReversal(1.0)(inputs).sum().backward()
+    assert torch.equal(inputs.grad, torch.tensor([-1.0, -1.0]))
 
 
 def test_manifest_dataset_modes(tmp_path) -> None:

@@ -161,14 +161,16 @@ Run the faithful public-data STP reproduction sequentially with:
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   scripts\run_stp_faithful_public.ps1 `
-  -SkipDataPreparation `
-  -RunName stp_public_method_v2
+  -RunName stp_public_method_v4 `
+  -ProcessedName stp_public_method_v4
 ```
 
 The runner first performs a strict dataset audit and then executes F1, F2, and
 F3 in sequence inside one isolated run directory. It never loads checkpoints
 from earlier STP attempts. Previous public-method results are preserved in
 [`results/stp_faithful_public_previous`](results/stp_faithful_public_previous).
+The completed v4 audit and held-out results are summarized in
+[`results/stp_public_reproduction`](results/stp_public_reproduction).
 
 Run the repeated STP downstream optimization matrix with:
 

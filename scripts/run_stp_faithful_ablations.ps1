@@ -1,6 +1,7 @@
 param(
     [int]$WaitForProcessId = 0,
-    [string]$BaselineRunName = "stp_public_method_v2"
+    [string]$BaselineRunName = "stp_public_method_v4",
+    [string]$ProcessedName = "stp_public_method_v4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,7 @@ $baselineRoot = Join-Path $projectRoot ("outputs\{0}" -f $BaselineRunName)
 $summaryRoot = Join-Path $projectRoot ("outputs\{0}_ablations" -f $BaselineRunName)
 $env:PPG_BP_DATA_ROOT = $dataRoot
 $env:STP_RUN_ROOT = $baselineRoot
+$env:STP_DATA_ROOT = Join-Path $dataRoot ("processed\{0}" -f $ProcessedName)
 
 New-Item -ItemType Directory -Force -Path $logRoot, $summaryRoot | Out-Null
 Set-Location $projectRoot

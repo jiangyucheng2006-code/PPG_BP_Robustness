@@ -1,6 +1,7 @@
 param(
     [int]$StallMinutes = 25,
-    [string]$RunName = "stp_public_method_v2"
+    [string]$RunName = "stp_public_method_v4",
+    [string]$ProcessedName = "stp_public_method_v4"
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -24,17 +25,24 @@ function Get-StpProcesses {
 }
 
 function Get-Fingerprint {
-    $latestLog = Get-ChildItem $runLogRoot -Filter "stp_faithful_*" -File |
+    $latestLog = Get-ChildItem $runLogRoot -File |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    $mimicCount = @(Get-ChildItem "D:\Datasets\PPG_BP_Robustness\processed\stp_faithful_public\subjects\mimiciii\*_signals.npy").Count
-    $checkpoints = @(Get-ChildItem $runRoot -Recurse -Filter "best.pt").Count
-    $metrics = @(Get-ChildItem $runRoot -Recurse -Filter "metrics.json").Count
+    $mimicCount = @(Get-ChildItem "D:\Datasets\PPG_BP_Robustness\processed\$ProcessedName\subjects\mimiciii\*_signals.npy").Count
+    $latestState = Get-ChildItem $runRoot -Recurse -File |
+        Where-Object { $_.Name -in @("best.pt", "last.pt", "history.json", "metrics.json") } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $processClock = (Get-StpProcesses | Measure-Object -Property UserModeTime -Sum).Sum
     $logIdentity = if ($latestLog) {
         "{0}|{1}|{2}" -f $latestLog.Name, $latestLog.Length, $latestLog.LastWriteTimeUtc.Ticks
     } else {
         "no-log"
     }
-    "$logIdentity|mimic=$mimicCount|checkpoints=$checkpoints|metrics=$metrics"
+    $stateIdentity = if ($latestState) {
+        "{0}|{1}|{2}" -f $latestState.FullName, $latestState.Length, $latestState.LastWriteTimeUtc.Ticks
+    } else {
+        "no-state"
+    }
+    "$logIdentity|$stateIdentity|mimic=$mimicCount|cpu=$processClock"
 }
 
 "$(Get-Date -Format o) monitor started; threshold=${StallMinutes}m" | Out-File $monitorLog -Append -Encoding UTF8
@@ -58,7 +66,7 @@ while ($true) {
     if ($processes.Count -eq 0) {
         $reason = "All STP pipeline processes disappeared before the summary was produced."
     } elseif ($minutesWithoutProgress -ge $StallMinutes) {
-        $reason = "No log, subject-count, checkpoint, or metrics change for at least $StallMinutes minutes."
+        $reason = "No log, data, checkpoint, or process-CPU change for at least $StallMinutes minutes."
     }
 
     if ($reason) {

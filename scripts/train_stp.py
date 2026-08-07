@@ -140,14 +140,23 @@ def regression_loss(
 
 
 @torch.no_grad()
-def evaluate_pretrain(model, loader, transforms, device) -> dict[str, float]:
+def evaluate_pretrain(
+    model,
+    loader,
+    transforms,
+    device,
+    *,
+    seed: int,
+) -> dict[str, float]:
     model.eval()
     squared_error = 0.0
     absolute_error = 0.0
     count = 0
-    for clean in loader:
+    for batch_index, clean in enumerate(loader):
         clean = clean.to(device, non_blocking=True)
-        transformed, target, _ = transforms(clean)
+        # Reuse exactly the same corruptions at every validation pass. Without
+        # this, early stopping compares different random validation tasks.
+        transformed, target, _ = transforms(clean, seed=seed + batch_index)
         reconstruction = model(transformed)
         squared_error += float(F.mse_loss(reconstruction, target, reduction="sum"))
         absolute_error += float(F.l1_loss(reconstruction, target, reduction="sum"))
@@ -463,6 +472,7 @@ def main() -> None:
                 loaders["val"],
                 transforms,
                 device,
+                seed=seed + 10_000,
             )
         elif stage == "pattern":
             validation = evaluate_pattern(model, loaders["val"], device)
@@ -536,7 +546,13 @@ def main() -> None:
     )
     model.load_state_dict(best["model"])
     if stage == "pretrain":
-        test = evaluate_pretrain(model, loaders["test"], transforms, device)
+        test = evaluate_pretrain(
+            model,
+            loaders["test"],
+            transforms,
+            device,
+            seed=seed + 20_000,
+        )
     elif stage == "pattern":
         test = evaluate_pattern(model, loaders["test"], device)
     else:

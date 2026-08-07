@@ -1,6 +1,7 @@
 param(
     [switch]$SkipDataPreparation,
-    [string]$RunName = "stp_public_method_v2"
+    [string]$RunName = "stp_public_method_v4",
+    [string]$ProcessedName = "stp_public_method_v4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,11 +9,12 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $dataRoot = "D:\Datasets\PPG_BP_Robustness"
 $rawRoot = Join-Path $dataRoot "STP_Public_Raw"
-$processedRoot = Join-Path $dataRoot "processed\stp_faithful_public"
+$processedRoot = Join-Path $dataRoot ("processed\{0}" -f $ProcessedName)
 $runRoot = Join-Path $projectRoot ("outputs\{0}" -f $RunName)
 $logRoot = Join-Path $dataRoot ("logs\{0}" -f $RunName)
 $env:PPG_BP_DATA_ROOT = $dataRoot
 $env:STP_RUN_ROOT = $runRoot
+$env:STP_DATA_ROOT = $processedRoot
 
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
@@ -24,6 +26,7 @@ if (-not $SkipDataPreparation) {
         --download-unpaired `
         --reuse-prepared `
         --mimic-max-subjects 200 `
+        --discover-mimic-records `
         --discover-mimic-unpaired `
         --mimic-unpaired-subjects 300 `
         --strict-stp-counts
